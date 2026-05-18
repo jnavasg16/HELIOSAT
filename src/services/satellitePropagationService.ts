@@ -40,17 +40,16 @@ export function propagateSatelliteFromTle(tle: SatelliteTLE, date: Date): Propag
     const satrec = satellite.twoline2satrec(tle.line1, tle.line2);
     
     // Extract inclination (satrec.inclo is in radians)
-    if (satrec && (satrec as any).inclo !== undefined) {
+    if (satrec.inclo !== undefined) {
       result.inclinationAvailable = true;
-      result.inclinationDeg = satellite.degreesLong((satrec as any).inclo); 
+      result.inclinationDeg = satellite.degreesLong(satrec.inclo); 
     }
 
     const positionAndVelocity = satellite.propagate(satrec, date);
 
-    if (positionAndVelocity && positionAndVelocity.position && typeof positionAndVelocity.position !== 'boolean') {
-      const positionEci = positionAndVelocity.position as any;
+    if (positionAndVelocity) {
       const gmst = satellite.gstime(date);
-      const positionGd = satellite.eciToGeodetic(positionEci, gmst);
+      const positionGd = satellite.eciToGeodetic(positionAndVelocity.position, gmst);
 
       result.positionAvailable = true;
       result.latitude = satellite.degreesLat(positionGd.latitude);
@@ -58,13 +57,10 @@ export function propagateSatelliteFromTle(tle: SatelliteTLE, date: Date): Propag
       
       result.altitudeAvailable = true;
       result.altitudeKm = positionGd.height;
-    }
-
-    if (positionAndVelocity && positionAndVelocity.velocity && typeof positionAndVelocity.velocity !== 'boolean') {
-      const velocityEci = positionAndVelocity.velocity as any;
-      const vX = velocityEci.x;
-      const vY = velocityEci.y;
-      const vZ = velocityEci.z;
+  
+      const vX = positionAndVelocity.velocity.x;
+      const vY = positionAndVelocity.velocity.y;
+      const vZ = positionAndVelocity.velocity.z;
       
       if (vX !== undefined && vY !== undefined && vZ !== undefined) {
         const vMag = Math.sqrt(vX*vX + vY*vY + vZ*vZ);
@@ -72,7 +68,7 @@ export function propagateSatelliteFromTle(tle: SatelliteTLE, date: Date): Propag
         result.velocityKmS = vMag;
       }
     }
-  } catch (error) {
+  } catch {
     // If propagation fails for a satellite, do not display propagated values for it.
     // It will return false for all availability flags.
   }

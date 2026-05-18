@@ -17,13 +17,31 @@ interface SolarWindChartsPanelProps {
   noaaPlasmaData: NoaaServiceResponse<NoaaPlasmaData>;
 }
 
+type SolarWindChartRow = NoaaMagnetometerData | NoaaPlasmaData;
+type SolarWindChartKey = keyof NoaaMagnetometerData | keyof NoaaPlasmaData;
+
 interface ChartProps {
-  data: any[];
-  dataKey: string;
+  data: SolarWindChartRow[];
+  dataKey: SolarWindChartKey;
   name: string;
   unit: string;
   color: string;
   hasData: boolean;
+}
+
+function parseChartValue(row: SolarWindChartRow, dataKey: SolarWindChartKey) {
+  if (!(dataKey in row)) {
+    return null;
+  }
+
+  const rawValue = row[dataKey as keyof SolarWindChartRow];
+
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const parsedValue = Number(rawValue);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
 }
 
 const SimpleLineChart: React.FC<ChartProps> = ({ data, dataKey, name, unit, color, hasData }) => {
@@ -39,12 +57,12 @@ const SimpleLineChart: React.FC<ChartProps> = ({ data, dataKey, name, unit, colo
 
   // Parse values to float for charting, keep time_tag as is
   const parsedData = data.map(d => {
-    // Only map if the value exists and is not null
-    const val = d[dataKey] !== null && d[dataKey] !== undefined ? parseFloat(d[dataKey]) : null;
+    const value = parseChartValue(d, dataKey);
+
     return {
       ...d,
       timeShort: d.time_tag ? new Date(d.time_tag).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
-      [dataKey]: isNaN(val as any) ? null : val
+      [dataKey]: value
     };
   });
 
@@ -68,7 +86,7 @@ const SimpleLineChart: React.FC<ChartProps> = ({ data, dataKey, name, unit, colo
             <YAxis 
               stroke="#475569" 
               fontSize={10} 
-              tickFormatter={(val) => val.toFixed(1)}
+              tickFormatter={(val: number | string) => Number(val).toFixed(1)}
               domain={['auto', 'auto']}
             />
             <Tooltip 

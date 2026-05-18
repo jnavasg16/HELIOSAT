@@ -63,7 +63,7 @@ export async function fetchTleGroup(groupName: string = 'stations'): Promise<Cel
       tles
     };
 
-  } catch (error) {
+  } catch {
     return {
       isConnected: false,
       lastUpdated: null,
