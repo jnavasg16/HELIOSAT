@@ -3,6 +3,7 @@
 import {
   Eye,
   EyeOff,
+  FlaskConical,
   KeyRound,
   LogIn,
   LogOut,
@@ -12,7 +13,8 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase/client';
 
@@ -20,6 +22,11 @@ type AuthMode = 'login' | 'signup' | 'forgot' | 'update';
 
 type AuthUserState = {
   email: string | null;
+  cargo: string | null;
+};
+
+type AuthProfile = {
+  cargo: string | null;
 };
 
 const AUTH_OVERLAY_Z_INDEX = 2147483647;
@@ -83,6 +90,26 @@ export function AuthControls() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
+  const buildAuthUserState = useCallback(
+    async (currentUser: { id: string; email?: string | null } | null): Promise<AuthUserState | null> => {
+      if (!supabase || !currentUser) {
+        return null;
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('cargo')
+        .eq('id', currentUser.id)
+        .maybeSingle<AuthProfile>();
+
+      return {
+        email: currentUser.email ?? null,
+        cargo: !error ? data?.cargo ?? null : null,
+      };
+    },
+    [supabase],
+  );
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -112,7 +139,7 @@ export function AuthControls() {
         return;
       }
 
-      setUser(currentUser ? { email: currentUser.email ?? null } : null);
+      setUser(await buildAuthUserState(currentUser));
     };
 
     void loadUser();
@@ -150,14 +177,16 @@ export function AuthControls() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? { email: session.user.email ?? null } : null);
+      void (async () => {
+        setUser(await buildAuthUserState(session?.user ?? null));
+      })();
     });
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [buildAuthUserState, supabase]);
 
   const resetFormStatus = () => {
     setMessage(null);
@@ -203,7 +232,7 @@ export function AuthControls() {
       if (signUpError) {
         setError(getFriendlyAuthError(signUpError.message));
       } else if (data.session) {
-        setUser(data.user ? { email: data.user.email ?? null } : null);
+        setUser(await buildAuthUserState(data.user ?? null));
         setMessage('Cuenta creada. Sesion iniciada.');
         setIsOpen(false);
       } else {
@@ -240,7 +269,7 @@ export function AuthControls() {
       if (signInError) {
         setError(getFriendlyAuthError(signInError.message));
       } else {
-        setUser(data.user ? { email: data.user.email ?? null } : null);
+        setUser(await buildAuthUserState(data.user ?? null));
         setMessage('Sesion iniciada.');
         setIsOpen(false);
       }
@@ -526,6 +555,16 @@ export function AuthControls() {
               </div>
 
               <div className="grid gap-2">
+                {user.cargo === 'admin' && (
+                  <Link
+                    href="/playground"
+                    onClick={() => setIsProfileMenuOpen(false)}
+                    className="flex h-10 items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 text-sm text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/15"
+                  >
+                    <FlaskConical className="h-4 w-4" aria-hidden="true" />
+                    <span>Playground</span>
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => openModal('update')}
