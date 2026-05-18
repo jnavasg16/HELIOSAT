@@ -22,6 +22,8 @@ type AuthUserState = {
   email: string | null;
 };
 
+const AUTH_OVERLAY_Z_INDEX = 2147483647;
+
 const modalTitles: Record<AuthMode, string> = {
   login: 'Iniciar sesion',
   signup: 'Crear cuenta',
@@ -303,7 +305,8 @@ export function AuthControls() {
     isOpen && typeof document !== 'undefined'
       ? createPortal(
           <div
-            className="fixed inset-0 z-[9999] grid place-items-center bg-slate-950/85 p-4 backdrop-blur-md sm:p-8"
+            className="fixed inset-0 grid place-items-center bg-slate-950/85 p-4 backdrop-blur-md sm:p-8"
+            style={{ zIndex: AUTH_OVERLAY_Z_INDEX }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="auth-dialog-title"
@@ -502,7 +505,10 @@ export function AuthControls() {
           </button>
 
           {isProfileMenuOpen && (
-            <div className="absolute right-0 top-full z-[80] mt-3 w-80 rounded-lg border border-slate-700 bg-slate-950 p-4 shadow-2xl shadow-cyan-950/30">
+            <div
+              className="absolute right-0 top-full mt-3 max-h-[min(560px,calc(100dvh-6rem))] w-80 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 p-4 shadow-2xl shadow-cyan-950/30"
+              style={{ zIndex: AUTH_OVERLAY_Z_INDEX }}
+            >
               <div className="mb-4 flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10 text-lg font-bold text-cyan-100">
                   {getUserInitial(user.email)}

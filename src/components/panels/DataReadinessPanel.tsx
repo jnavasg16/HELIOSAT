@@ -66,11 +66,11 @@ export const DataReadinessPanel: React.FC<DataReadinessPanelProps> = ({
       <div className="mt-auto pt-3 border-t border-slate-700/50">
         {readiness.allAvailable ? (
           <p className="text-[10px] text-emerald-400/90 font-mono leading-relaxed bg-emerald-900/10 p-2 rounded border border-emerald-900/30">
-            Required real inputs are available. Risk scoring can be enabled once transparent equations are implemented.
+            Required real inputs are available.
           </p>
         ) : (
           <p className="text-[10px] text-amber-500/80 font-mono leading-relaxed bg-amber-900/10 p-2 rounded border border-amber-900/30">
-            Risk scoring disabled in this MVP because no synthetic or inferred risk values are allowed.
+            Some required real inputs are not available.
           </p>
         )}
       </div>

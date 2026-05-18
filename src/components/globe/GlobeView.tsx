@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react';
+import { TriangleAlert } from 'lucide-react';
 import { feature } from 'topojson-client';
 import type { GlobeMethods, GlobeProps } from 'react-globe.gl';
 import type { GeometryObject, Topology } from 'topojson-specification';
@@ -9,6 +10,25 @@ import { useSatelliteSelection } from '@/contexts/SatelliteSelectionContext';
 
 const EARTH_RADIUS_KM = 6371;
 const MIN_CANVAS_SIZE = 1;
+
+const canCreateWebGLContext = () => {
+  if (typeof document === 'undefined') return false;
+
+  const canvas = document.createElement('canvas');
+
+  try {
+    const context = (
+      canvas.getContext('webgl2') ||
+      canvas.getContext('webgl') ||
+      canvas.getContext('experimental-webgl')
+    ) as WebGLRenderingContext | WebGL2RenderingContext | null;
+
+    context?.getExtension('WEBGL_lose_context')?.loseContext();
+    return Boolean(context);
+  } catch {
+    return false;
+  }
+};
 
 type GlobeComponentType = React.ComponentType<
   GlobeProps & { ref?: React.MutableRefObject<GlobeMethods | undefined> }
@@ -34,6 +54,25 @@ interface GlobeViewProps {
   showCount: string;
 }
 
+const GlobeUnavailable: React.FC<{ message: string; showCount: string }> = ({ message, showCount }) => (
+  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(14,116,144,0.12),rgba(2,6,23,0.96)_58%)] p-6">
+    <div className="max-w-md rounded border border-amber-500/25 bg-slate-950/70 p-5 text-center shadow-2xl shadow-black/30">
+      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded border border-amber-500/35 bg-amber-500/10 text-amber-300">
+        <TriangleAlert className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <div className="text-[10px] font-mono uppercase tracking-widest text-amber-300">
+        Earth Orbit View Unavailable
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        {message}
+      </p>
+      <div className="mt-4 rounded border border-slate-800 bg-slate-950/70 px-3 py-2 text-[10px] font-mono text-slate-500">
+        {showCount}
+      </div>
+    </div>
+  </div>
+);
+
 export const GlobeView: React.FC<GlobeViewProps> = ({
   tles,
   propagatedSatellites,
@@ -43,6 +82,7 @@ export const GlobeView: React.FC<GlobeViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const [GlobeComponent, setGlobeComponent] = useState<GlobeComponentType | null>(null);
+  const [globeError, setGlobeError] = useState<string | null>(null);
   const [worldPolygons, setWorldPolygons] = useState<object[]>([]);
   const [worldError, setWorldError] = useState<string | null>(null);
   const [dims, setDims] = useState({ w: 900, h: 620 });
@@ -50,7 +90,24 @@ export const GlobeView: React.FC<GlobeViewProps> = ({
 
   // Dynamic import — globe.gl requires browser APIs
   useEffect(() => {
-    import('react-globe.gl').then(mod => setGlobeComponent(() => mod.default as GlobeComponentType));
+    let isMounted = true;
+
+    if (!canCreateWebGLContext()) {
+      setGlobeError('The browser could not create a WebGL context for the 3D globe.');
+      return;
+    }
+
+    import('react-globe.gl')
+      .then(mod => {
+        if (isMounted) setGlobeComponent(() => mod.default as GlobeComponentType);
+      })
+      .catch(() => {
+        if (isMounted) setGlobeError('The 3D globe renderer could not be loaded.');
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Load world-atlas TopoJSON from CDN (static dataset, one-time load)
@@ -152,6 +209,10 @@ export const GlobeView: React.FC<GlobeViewProps> = ({
   const readPathCoordinate = (point: unknown, index: number) => {
     return Array.isArray(point) && typeof point[index] === 'number' ? point[index] : 0;
   };
+
+  if (globeError) {
+    return <GlobeUnavailable message={globeError} showCount={showCount} />;
+  }
 
   if (!GlobeComponent) {
     return (

@@ -55,7 +55,13 @@ const SimpleLineChart: React.FC<ChartProps> = ({ data, dataKey, name, unit, colo
         <span className="text-[10px] text-slate-500 font-mono">{unit}</span>
       </div>
       <div className="h-32 min-h-[128px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer
+          width="100%"
+          height={128}
+          minWidth={0}
+          minHeight={128}
+          initialDimension={{ width: 320, height: 128 }}
+        >
           <LineChart data={parsedData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
             <XAxis 

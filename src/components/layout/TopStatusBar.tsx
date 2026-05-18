@@ -37,7 +37,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   }, []);
 
   return (
-    <header className="flex items-center justify-between px-6 py-3 bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-lg shadow-lg">
+    <header className="sticky top-3 z-50 flex shrink-0 items-center justify-between gap-4 overflow-hidden rounded-lg border border-slate-700/50 bg-slate-900/75 px-4 py-3 shadow-lg backdrop-blur-md xl:top-0 xl:px-6">
       <div className="flex items-center gap-3">
         <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse flex-shrink-0"></span>
         {/* HelioSat logo — mix-blend-multiply inverts the white background against the dark shell */}
@@ -52,7 +52,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
         </span>
       </div>
       
-      <div className="flex items-center gap-6 text-sm">
+      <div className="flex min-w-0 items-center gap-4 overflow-x-auto text-sm xl:gap-6">
         <div className="font-mono text-cyan-300 tracking-wider">
           {time}
         </div>

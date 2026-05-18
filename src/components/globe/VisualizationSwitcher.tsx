@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo } from 'react';
-import { Globe2, Orbit, Settings2, Sun } from 'lucide-react';
+import { Globe2, Orbit, Settings2, Sun, TriangleAlert } from 'lucide-react';
 import { GlobeView } from './GlobeView';
 import { SunEarthView } from './SunEarthView';
 import { SatelliteConfigModal } from './SatelliteConfigModal';
@@ -20,9 +20,54 @@ interface Props {
   noaaMagData: NoaaServiceResponse<NoaaMagnetometerData>;
   noaaPlasmaData: NoaaServiceResponse<NoaaPlasmaData>;
   noaaEphemerisData: NoaaServiceResponse<NoaaEphemerisData>;
+  className?: string;
 }
 
-export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasmaData, noaaEphemerisData }) => {
+const GlobeFailureNotice: React.FC<{ message: string }> = ({ message }) => (
+  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(14,116,144,0.12),rgba(2,6,23,0.96)_58%)] p-6">
+    <div className="max-w-md rounded border border-amber-500/25 bg-slate-950/70 p-5 text-center shadow-2xl shadow-black/30">
+      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded border border-amber-500/35 bg-amber-500/10 text-amber-300">
+        <TriangleAlert className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <div className="text-[10px] font-mono uppercase tracking-widest text-amber-300">
+        Earth Orbit View Unavailable
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        {message}
+      </p>
+      <div className="mt-4 text-[10px] font-mono uppercase tracking-widest text-slate-600">
+        Switch to Sun-Earth for the connected NOAA view.
+      </div>
+    </div>
+  </div>
+);
+
+class GlobeRenderBoundary extends React.Component<
+  { children: React.ReactNode },
+  { message: string | null }
+> {
+  state = { message: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      message: error instanceof Error ? error.message : 'The 3D globe renderer failed.',
+    };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Earth orbit view failed', error);
+  }
+
+  render() {
+    if (this.state.message) {
+      return <GlobeFailureNotice message={this.state.message} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasmaData, noaaEphemerisData, className = '' }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('earth');
   const [propagationTime, setPropagationTime] = useState(() => Date.now());
 
@@ -76,9 +121,9 @@ export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasma
       {/* Modal (renders at fixed overlay level) */}
       <SatelliteConfigModal />
 
-      <div className="flex h-full min-w-0 flex-col gap-2">
+      <div className={`flex h-full min-h-0 min-w-0 flex-col gap-2 ${className}`}>
         {/* Slim toolbar: view mode + satellite config button */}
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto">
 
           {/* View mode toggle */}
           <div className="flex bg-slate-800/50 border border-slate-700/50 rounded-md overflow-hidden">
@@ -146,12 +191,14 @@ export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasma
         {/* Main visualization */}
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-slate-700/50 bg-[#020617]">
           {viewMode === 'earth' ? (
-            <GlobeView
-              tles={trackedTles}
-              propagatedSatellites={propagated}
-              orbitPathPoints={orbitPathPoints}
-              showCount={mapStatus}
-            />
+            <GlobeRenderBoundary>
+              <GlobeView
+                tles={trackedTles}
+                propagatedSatellites={propagated}
+                orbitPathPoints={orbitPathPoints}
+                showCount={mapStatus}
+              />
+            </GlobeRenderBoundary>
           ) : (
             <SunEarthView
               noaaMagData={noaaMagData}
