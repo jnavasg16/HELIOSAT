@@ -13,7 +13,6 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase/client';
@@ -556,14 +555,16 @@ export function AuthControls() {
 
               <div className="grid gap-2">
                 {user.cargo === 'admin' && (
-                  <Link
+                  <a
                     href="/playground"
-                    onClick={() => setIsProfileMenuOpen(false)}
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                    }}
                     className="flex h-10 items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 text-sm text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/15"
                   >
                     <FlaskConical className="h-4 w-4" aria-hidden="true" />
                     <span>Playground</span>
-                  </Link>
+                  </a>
                 )}
                 <button
                   type="button"

@@ -3,13 +3,7 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { PlaygroundDashboard } from '@/components/playground/PlaygroundDashboard';
 import { getCurrentAdminState } from '@/lib/supabase/admin';
-import {
-  fetchNoaaEphemerisData,
-  fetchNoaaMagnetometerData,
-  fetchNoaaPlasmaData,
-} from '@/services/noaaSolarWindService';
-import { fetchNoaaAlerts } from '@/services/noaaAlertsService';
-import { fetchTleGroup } from '@/services/celestrakService';
+import { fetchPlaygroundTelemetry } from '@/services/playgroundTelemetryService';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,24 +39,13 @@ export default async function PlaygroundPage() {
     return <UnauthorizedPlayground />;
   }
 
-  const [noaaMagData, noaaPlasmaData, noaaEphemerisData, noaaAlertsData, celestrakData] =
-    await Promise.all([
-      fetchNoaaMagnetometerData(),
-      fetchNoaaPlasmaData(),
-      fetchNoaaEphemerisData(),
-      fetchNoaaAlerts(),
-      fetchTleGroup('stations'),
-    ]);
+  const telemetryData = await fetchPlaygroundTelemetry();
 
   return (
     <AppShell>
       <PlaygroundDashboard
         adminEmail={adminState.email}
-        noaaMagData={noaaMagData}
-        noaaPlasmaData={noaaPlasmaData}
-        noaaEphemerisData={noaaEphemerisData}
-        noaaAlertsData={noaaAlertsData}
-        celestrakData={celestrakData}
+        {...telemetryData}
       />
     </AppShell>
   );

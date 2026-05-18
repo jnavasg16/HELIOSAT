@@ -37,11 +37,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   }, []);
 
   return (
-<<<<<<< HEAD
-    <header className="sticky top-3 z-50 flex shrink-0 items-center justify-between gap-4 overflow-hidden rounded-lg border border-slate-700/50 bg-slate-900/75 px-4 py-3 shadow-lg backdrop-blur-md xl:top-0 xl:px-6">
-=======
-    <header className="relative z-[100] flex items-center justify-between px-6 py-3 bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-lg shadow-lg">
->>>>>>> 90337db191c9eab10563612d4e74d676224212e9
+    <header className="sticky top-3 z-[100] flex shrink-0 items-center justify-between gap-4 overflow-visible rounded-lg border border-slate-700/50 bg-slate-900/75 px-4 py-3 shadow-lg backdrop-blur-md xl:top-0 xl:px-6">
       <div className="flex items-center gap-3">
         <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse flex-shrink-0"></span>
         {/* HelioSat logo — mix-blend-multiply inverts the white background against the dark shell */}
@@ -56,38 +52,41 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
         </span>
       </div>
       
-      <div className="flex min-w-0 items-center gap-4 overflow-x-auto text-sm xl:gap-6">
-        <div className="font-mono text-cyan-300 tracking-wider">
-          {time}
+      <div className="flex min-w-0 items-center gap-3 text-sm xl:gap-4">
+        <div className="flex min-w-0 items-center gap-4 overflow-x-auto py-1 xl:gap-6">
+          <div className="font-mono text-cyan-300 tracking-wider">
+            {time}
+          </div>
+          <div className="h-4 w-px bg-slate-700"></div>
+          <div className="flex items-center gap-4">
+            {noaaMagLastUpdated && (
+              <div className="text-xs text-slate-500 mr-2">
+                NOAA Solar Wind Update: {new Date(noaaMagLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
+              </div>
+            )}
+            <SourceStatusBadge sourceName="NOAA Solar Wind" isConnected={noaaMagConnected} isPartial={noaaMagPartial} />
+            
+            <div className="h-4 w-px bg-slate-700 mx-2"></div>
+            
+            {noaaAlertsLastUpdated && (
+              <div className="text-xs text-slate-500 mr-2">
+                Alerts Update: {new Date(noaaAlertsLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
+              </div>
+            )}
+            <SourceStatusBadge sourceName="NOAA Alerts" isConnected={noaaAlertsConnected} />
+            
+            <div className="h-4 w-px bg-slate-700 mx-2"></div>
+            
+            {celesTrakLastUpdated && (
+              <div className="text-xs text-slate-500 mr-2">
+                CelesTrak Update: {new Date(celesTrakLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
+              </div>
+            )}
+            <SourceStatusBadge sourceName="CelesTrak" isConnected={celesTrakConnected} />
+          </div>
         </div>
-        <div className="h-4 w-px bg-slate-700"></div>
-        <div className="flex items-center gap-4">
-          {noaaMagLastUpdated && (
-            <div className="text-xs text-slate-500 mr-2">
-              NOAA Solar Wind Update: {new Date(noaaMagLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
-            </div>
-          )}
-          <SourceStatusBadge sourceName="NOAA Solar Wind" isConnected={noaaMagConnected} isPartial={noaaMagPartial} />
-          
-          <div className="h-4 w-px bg-slate-700 mx-2"></div>
-          
-          {noaaAlertsLastUpdated && (
-            <div className="text-xs text-slate-500 mr-2">
-              Alerts Update: {new Date(noaaAlertsLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
-            </div>
-          )}
-          <SourceStatusBadge sourceName="NOAA Alerts" isConnected={noaaAlertsConnected} />
-          
-          <div className="h-4 w-px bg-slate-700 mx-2"></div>
-          
-          {celesTrakLastUpdated && (
-            <div className="text-xs text-slate-500 mr-2">
-              CelesTrak Update: {new Date(celesTrakLastUpdated).toLocaleTimeString('en-US', { timeZone: 'UTC' })} UTC
-            </div>
-          )}
-          <SourceStatusBadge sourceName="CelesTrak" isConnected={celesTrakConnected} />
 
-          <div className="h-4 w-px bg-slate-700 mx-2"></div>
+        <div className="relative z-[110] flex shrink-0 items-center gap-3 border-l border-slate-700 pl-3">
           <AdminIndicator />
           <AuthControls />
         </div>
