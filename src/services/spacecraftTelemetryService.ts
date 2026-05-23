@@ -383,7 +383,7 @@ async function fetchAceTelemetry(): Promise<SpacecraftTelemetry> {
     source: 'NASA CDAWeb HAPI',
     endpoint: 'AC_K0_MFI + AC_K0_SWE',
     platform: 'Spacecraft L1 de viento solar',
-    description: 'Datos directos de ACE para magnetometro y plasma; se muestran como DATA si el ultimo punto no es reciente.',
+    description: 'Datos directos de ACE para magnetometro y plasma; se muestran como STALE si el ultimo punto no es reciente.',
     variables: ['Time', 'Magnitude', 'BGSEc', 'Np', 'Vp', 'Tpr'],
     status: status.status,
     lastSampleTime: status.lastSampleTime,
