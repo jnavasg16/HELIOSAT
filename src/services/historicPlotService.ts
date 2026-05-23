@@ -96,7 +96,6 @@ const PLOT_READY_SOURCE_IDS = new Set([
   'cdaweb-ace-wind-imap',
   'omni-hro',
   'swpc-goes-json',
-  'ncei-goes-r-mag-seiss',
 ]);
 
 function sleep(delayMs: number) {
@@ -583,14 +582,10 @@ export async function buildHistoricPlotsSnapshot(
     warnings.push(...result.warnings);
   }
 
-  if (sourceIds.includes('swpc-goes-json') || sourceIds.includes('ncei-goes-r-mag-seiss')) {
+  if (sourceIds.includes('swpc-goes-json')) {
     const result = await buildGoesCharts(goesRangeResult.range);
     charts.push(...result.charts);
     warnings.push(...result.warnings);
-
-    if (sourceIds.includes('ncei-goes-r-mag-seiss')) {
-      warnings.push('NCEI GOES-R archive parser is pending; recent GOES plots use SWPC JSON preview data.');
-    }
   }
 
   if (unsupportedSourceIds.length > 0) {

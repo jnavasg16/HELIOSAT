@@ -11,12 +11,16 @@ import {
   Clock3,
   Database,
   ExternalLink,
+  Eye,
+  EyeOff,
   FlaskConical,
   Gauge,
   Globe2,
   Info,
   Layers3,
   ListFilter,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   RadioTower,
   Satellite,
@@ -112,6 +116,15 @@ const PLAYGROUND_TABS: Array<{ id: PlaygroundTab; label: string; description: st
   { id: 'storms', label: 'Storm Browser', description: 'Event catalog and holdout' },
   { id: 'live', label: 'Live Forecast', description: 'Operational prediction loop' },
 ];
+const HISTORIC_PLOT_COUNT_BY_SOURCE_ID: Record<string, number> = {
+  'cdaweb-ace-wind-imap': 16,
+  'omni-hro': 7,
+  'swpc-goes-json': 12,
+};
+
+function getHistoricPlotCount(sourceId: string) {
+  return HISTORIC_PLOT_COUNT_BY_SOURCE_ID[sourceId] ?? 0;
+}
 
 function getDefaultHistoricRange() {
   const stop = new Date();
@@ -410,6 +423,7 @@ function SourceCatalogCard({
   onToggle,
   activeActionLabel = 'Selected',
   inactiveActionLabel = 'Select',
+  plotCount,
 }: {
   source: PublicSpaceWeatherSource;
   selectable?: boolean;
@@ -417,6 +431,7 @@ function SourceCatalogCard({
   onToggle?: (sourceId: string) => void;
   activeActionLabel?: string;
   inactiveActionLabel?: string;
+  plotCount?: number;
 }) {
   const content = (
     <>
@@ -430,6 +445,15 @@ function SourceCatalogCard({
             <span className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-slate-400">
               {source.cadence}
             </span>
+            {plotCount !== undefined && (
+              <span className={`rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest ${
+                plotCount > 0
+                  ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100'
+                  : 'border-slate-800 bg-slate-950 text-slate-600'
+              }`}>
+                {plotCount} plots
+              </span>
+            )}
           </div>
           <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
             {source.provider}
@@ -526,6 +550,7 @@ function SourceCatalogGrid({
   onToggleSource,
   activeActionLabel,
   inactiveActionLabel,
+  getPlotCount,
 }: {
   sources: PublicSpaceWeatherSource[];
   selectable?: boolean;
@@ -533,6 +558,7 @@ function SourceCatalogGrid({
   onToggleSource?: (sourceId: string) => void;
   activeActionLabel?: string;
   inactiveActionLabel?: string;
+  getPlotCount?: (sourceId: string) => number;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
@@ -545,9 +571,194 @@ function SourceCatalogGrid({
           onToggle={onToggleSource}
           activeActionLabel={activeActionLabel}
           inactiveActionLabel={inactiveActionLabel}
+          plotCount={getPlotCount?.(source.id)}
         />
       ))}
     </div>
+  );
+}
+
+function HistoricSourceSelector({
+  sources,
+  selectedSourceIds,
+  showUnselected,
+  onToggleSource,
+  onToggleShowUnselected,
+}: {
+  sources: PublicSpaceWeatherSource[];
+  selectedSourceIds: string[];
+  showUnselected: boolean;
+  onToggleSource: (sourceId: string) => void;
+  onToggleShowUnselected: () => void;
+}) {
+  const selectedSources = sources.filter(source => selectedSourceIds.includes(source.id));
+  const unselectedSources = sources.filter(source => !selectedSourceIds.includes(source.id));
+
+  const renderSourceRow = (source: PublicSpaceWeatherSource) => {
+    const selected = selectedSourceIds.includes(source.id);
+    const plotCount = getHistoricPlotCount(source.id);
+    const disabled = plotCount === 0 && !selected;
+
+    return (
+      <button
+        key={source.id}
+        type="button"
+        aria-pressed={selected}
+        disabled={disabled}
+        onClick={() => onToggleSource(source.id)}
+        className={`min-w-0 rounded-md border p-2.5 text-left transition ${
+          selected
+            ? 'border-cyan-400/45 bg-cyan-400/10 text-slate-100'
+            : disabled
+              ? 'cursor-not-allowed border-slate-800 bg-slate-950/35 text-slate-600'
+              : 'border-slate-800 bg-slate-950/45 text-slate-300 hover:border-slate-600 hover:bg-slate-900/50'
+        }`}
+        title={disabled ? 'No historic plot parser wired for this source yet' : undefined}
+      >
+        <span className="flex min-w-0 items-start justify-between gap-2">
+          <span className="flex min-w-0 items-start gap-2">
+            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+              selected ? 'border-cyan-300 bg-cyan-300 text-slate-950' : 'border-slate-600'
+            }`}>
+              {selected && <Check className="h-3 w-3" aria-hidden="true" />}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-medium">{source.name}</span>
+              <span className="mt-1 block truncate font-mono text-[9px] uppercase tracking-widest text-slate-500">
+                {source.provider}
+              </span>
+            </span>
+          </span>
+          <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest ${
+            plotCount > 0
+              ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100'
+              : 'border-slate-800 bg-slate-950 text-slate-600'
+          }`}>
+            {plotCount} plots
+          </span>
+        </span>
+        <span className="mt-2 flex items-center gap-1.5">
+          <span className="rounded border border-slate-700/80 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-widest text-slate-500">
+            {source.orbit}
+          </span>
+          <span className="rounded border border-slate-700/80 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-widest text-slate-500">
+            {source.cadence}
+          </span>
+        </span>
+      </button>
+    );
+  };
+
+  return (
+    <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <ListFilter className="h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
+          <h2 className="truncate text-xs font-semibold uppercase tracking-widest text-slate-300">
+            Historic data sets
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleShowUnselected}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/60 px-2 font-mono text-[9px] uppercase tracking-widest text-slate-400 transition hover:border-cyan-400/40 hover:text-cyan-100"
+        >
+          {showUnselected ? (
+            <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span>{showUnselected ? 'Hide' : 'Show'} others</span>
+        </button>
+      </div>
+
+      <div className="grid gap-2">
+        {selectedSources.length > 0 ? (
+          selectedSources.map(renderSourceRow)
+        ) : (
+          <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-500">
+            No plot-ready source selected.
+          </div>
+        )}
+      </div>
+
+      {showUnselected && (
+        <div className="mt-4">
+          <div className="mb-2 font-mono text-[9px] uppercase tracking-widest text-slate-600">
+            Other sources
+          </div>
+          <div className="grid gap-2">
+            {unselectedSources.map(renderSourceRow)}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoricSidebarRail({
+  sources,
+  selectedSourceIds,
+  onToggleSource,
+  onExpand,
+}: {
+  sources: PublicSpaceWeatherSource[];
+  selectedSourceIds: string[];
+  onToggleSource: (sourceId: string) => void;
+  onExpand: () => void;
+}) {
+  const selectedSources = sources.filter(source => selectedSourceIds.includes(source.id));
+
+  return (
+    <aside className="grid content-start gap-3">
+      <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-2 shadow-2xl backdrop-blur-xl">
+        <button
+          type="button"
+          aria-label="Expand historic sidebar"
+          title="Expand sidebar"
+          onClick={onExpand}
+          className="flex h-10 w-full items-center justify-center rounded-md border border-slate-700 bg-slate-950/60 text-slate-400 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-100"
+        >
+          <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <div className="mt-2 grid gap-2">
+          <div
+            className="flex h-10 items-center justify-center rounded-md border border-slate-800 bg-slate-950/50 text-cyan-300"
+            title="Historic window"
+          >
+            <CalendarRange className="h-4 w-4" aria-hidden="true" />
+          </div>
+          <div
+            className="grid min-h-12 place-items-center rounded-md border border-slate-800 bg-slate-950/50 text-amber-300"
+            title={`${selectedSources.length} selected data sets`}
+          >
+            <ListFilter className="h-4 w-4" aria-hidden="true" />
+            <span className="font-mono text-[9px] text-slate-500">{selectedSources.length}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-2 rounded-lg border border-slate-700/50 bg-slate-900/30 p-2 shadow-2xl backdrop-blur-xl">
+        {selectedSources.map(source => (
+          <button
+            key={source.id}
+            type="button"
+            aria-label={`Remove ${source.name}`}
+            title={`${source.name} · ${getHistoricPlotCount(source.id)} plots`}
+            onClick={() => onToggleSource(source.id)}
+            className="grid min-h-14 place-items-center rounded-md border border-cyan-400/35 bg-cyan-400/10 text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/15"
+          >
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="font-mono text-[9px] uppercase tracking-widest text-slate-300">
+              {source.orbit}
+            </span>
+            <span className="font-mono text-[9px] text-cyan-200">
+              {getHistoricPlotCount(source.id)}
+            </span>
+          </button>
+        ))}
+      </section>
+    </aside>
   );
 }
 
@@ -726,6 +937,7 @@ function TelemetryChart({
   plotTimeZone: PlotTimeZone;
 }) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const resizeTimeoutRef = useRef<number | null>(null);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const chartData = useMemo(
     () =>
@@ -767,10 +979,28 @@ function TelemetryChart({
 
     updateChartReadiness();
 
-    const resizeObserver = new ResizeObserver(updateChartReadiness);
+    const scheduleChartReadiness = () => {
+      if (resizeTimeoutRef.current !== null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+      }
+
+      resizeTimeoutRef.current = window.setTimeout(() => {
+        resizeTimeoutRef.current = null;
+        updateChartReadiness();
+      }, 90);
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleChartReadiness);
     resizeObserver.observe(chartContainer);
 
-    return () => resizeObserver.disconnect();
+    return () => {
+      resizeObserver.disconnect();
+
+      if (resizeTimeoutRef.current !== null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+        resizeTimeoutRef.current = null;
+      }
+    };
   }, [hasData]);
 
   return (
@@ -906,15 +1136,15 @@ export function PlaygroundDashboard({
   const [plotTimeZone, setPlotTimeZone] = useState<PlotTimeZone>('UTC');
   const [activeTab, setActiveTab] = useState<PlaygroundTab>('insitu');
   const [isMissionInfoOpen, setIsMissionInfoOpen] = useState(false);
+  const [isHistoricSidebarCollapsed, setIsHistoricSidebarCollapsed] = useState(false);
   const [selectedSpacecraftIds, setSelectedSpacecraftIds] = useState<SpacecraftId[]>(['DSCOVR']);
   const [historicRange, setHistoricRange] = useState(getDefaultHistoricRange);
   const [selectedHistoricSourceIds, setSelectedHistoricSourceIds] = useState<string[]>([
     'omni-hro',
     'cdaweb-ace-wind-imap',
     'swpc-goes-json',
-    'ncei-goes-r-mag-seiss',
-    'poes-metop-sem',
   ]);
+  const [showUnselectedHistoricSources, setShowUnselectedHistoricSources] = useState(false);
   const [selectedNearEarthSpacecraft, setSelectedNearEarthSpacecraft] = useState<string[]>(['GOES-19']);
   const [selectedLiveNearEarthSourceIds, setSelectedLiveNearEarthSourceIds] = useState<string[]>(['swpc-goes-json']);
   const [selectedEdaVariable, setSelectedEdaVariable] = useState('all');
@@ -1795,13 +2025,17 @@ export function PlaygroundDashboard({
   }, []);
 
   const toggleHistoricSource = useCallback((sourceId: string) => {
+    if (!selectedHistoricSourceIds.includes(sourceId) && getHistoricPlotCount(sourceId) === 0) {
+      return;
+    }
+
     setHistoricPlots(null);
     setSelectedHistoricSourceIds(currentSelection => (
       currentSelection.includes(sourceId)
         ? currentSelection.filter(currentId => currentId !== sourceId)
         : [...currentSelection, sourceId]
     ));
-  }, []);
+  }, [selectedHistoricSourceIds]);
 
   const toggleNearEarthSpacecraft = useCallback((spacecraftName: string) => {
     setSelectedNearEarthSpacecraft(currentSelection => (
@@ -1859,6 +2093,24 @@ export function PlaygroundDashboard({
     () => NEAR_EARTH_PUBLIC_SOURCES.filter(source => source.cadence !== 'live' || source.id === 'swpc-goes-json'),
     [],
   );
+  const allHistoricSources = useMemo(() => {
+    const byId = new Map<string, PublicSpaceWeatherSource>();
+
+    [...historicL1Sources, ...historicNearEarthSources].forEach(source => {
+      byId.set(source.id, source);
+    });
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const aCount = getHistoricPlotCount(a.id);
+      const bCount = getHistoricPlotCount(b.id);
+
+      if (aCount !== bCount) {
+        return bCount - aCount;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [historicL1Sources, historicNearEarthSources]);
   const nearEarthSpacecraftOptions = useMemo(
     () => Array.from(new Set(liveNearEarthSources.flatMap(source => source.spacecraft))).sort(),
     [liveNearEarthSources],
@@ -1908,12 +2160,13 @@ export function PlaygroundDashboard({
       .filter((message): message is string => Boolean(message)),
     [selectedNearEarthFeeds],
   );
-  const selectedHistoricSources = useMemo(
-    () =>
-      [...historicL1Sources, ...historicNearEarthSources].filter(source =>
-        selectedHistoricSourceIds.includes(source.id),
-      ),
-    [historicL1Sources, historicNearEarthSources, selectedHistoricSourceIds],
+  const selectedHistoricL1Sources = useMemo(
+    () => historicL1Sources.filter(source => selectedHistoricSourceIds.includes(source.id)),
+    [historicL1Sources, selectedHistoricSourceIds],
+  );
+  const selectedHistoricNearEarthSources = useMemo(
+    () => historicNearEarthSources.filter(source => selectedHistoricSourceIds.includes(source.id)),
+    [historicNearEarthSources, selectedHistoricSourceIds],
   );
   const historicChartDefinitions = useMemo<ChartDefinition[]>(
     () => (historicPlots?.charts ?? []).map(chart => ({
@@ -2282,90 +2535,91 @@ export function PlaygroundDashboard({
           </section>
         </main>
       ) : activeTab === 'historic' ? (
-        <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pr-1 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="grid content-start gap-4">
-            <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
-              <div className="mb-3 flex items-center gap-2">
-                <CalendarRange className="h-4 w-4 text-cyan-300" aria-hidden="true" />
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
-                  Historic window
-                </h2>
-              </div>
-              <div className="grid gap-3">
-                <label className="grid gap-1.5">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Start UTC</span>
-                  <input
-                    type="datetime-local"
-                    value={historicRange.start}
-                    onChange={event => {
-                      setHistoricRange(current => ({ ...current, start: event.target.value }));
-                      setHistoricPlots(null);
-                      setDataQuality(null);
-                      setUnivariateEda(null);
-                      setL1EarthCoupling(null);
-                      setFeatureWorkbench(null);
-                      setBaselinesLab(null);
-                      setSequenceModels(null);
-                    }}
-                    className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
-                  />
-                </label>
-                <label className="grid gap-1.5">
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Stop UTC</span>
-                  <input
-                    type="datetime-local"
-                    value={historicRange.stop}
-                    onChange={event => {
-                      setHistoricRange(current => ({ ...current, stop: event.target.value }));
-                      setHistoricPlots(null);
-                      setDataQuality(null);
-                      setUnivariateEda(null);
-                      setL1EarthCoupling(null);
-                      setFeatureWorkbench(null);
-                      setBaselinesLab(null);
-                      setSequenceModels(null);
-                    }}
-                    className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
-              <div className="mb-3 flex items-center gap-2">
-                <ListFilter className="h-4 w-4 text-amber-300" aria-hidden="true" />
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-300">
-                  Selected data sets
-                </h2>
-              </div>
-              <div className="grid gap-2">
-                {selectedHistoricSources.length > 0 ? (
-                  selectedHistoricSources.map(source => (
-                    <div
-                      key={source.id}
-                      className="rounded-md border border-slate-800 bg-slate-950/50 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0 truncate text-sm text-slate-100">{source.name}</div>
-                        <span className="rounded border border-slate-700 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-widest text-slate-400">
-                          {source.orbit}
-                        </span>
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 xl:flex-row">
+          <aside
+            className={`min-w-0 flex-none overflow-hidden transition-[width] duration-150 ease-out [will-change:width] motion-reduce:transition-none ${
+              isHistoricSidebarCollapsed ? 'w-[76px]' : 'w-full xl:w-[360px]'
+            }`}
+          >
+            {isHistoricSidebarCollapsed ? (
+              <HistoricSidebarRail
+                sources={allHistoricSources}
+                selectedSourceIds={selectedHistoricSourceIds}
+                onToggleSource={toggleHistoricSource}
+                onExpand={() => setIsHistoricSidebarCollapsed(false)}
+              />
+            ) : (
+                <div className="grid content-start gap-4">
+                  <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <CalendarRange className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden="true" />
+                        <h2 className="truncate text-xs font-semibold uppercase tracking-widest text-slate-300">
+                          Historic window
+                        </h2>
                       </div>
-                      <div className="mt-1 truncate font-mono text-[10px] text-slate-500">
-                        {source.provider}
-                      </div>
+                      <button
+                        type="button"
+                        aria-label="Collapse historic sidebar"
+                        title="Collapse sidebar"
+                        onClick={() => setIsHistoricSidebarCollapsed(true)}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-950/60 text-slate-400 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-100"
+                      >
+                        <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                      </button>
                     </div>
-                  ))
-                ) : (
-                  <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-500">
-                    No historical datasets selected.
-                  </div>
-                )}
-              </div>
-            </section>
+                    <div className="grid gap-3">
+                      <label className="grid gap-1.5">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Start UTC</span>
+                        <input
+                          type="datetime-local"
+                          value={historicRange.start}
+                          onChange={event => {
+                            setHistoricRange(current => ({ ...current, start: event.target.value }));
+                            setHistoricPlots(null);
+                            setDataQuality(null);
+                            setUnivariateEda(null);
+                            setL1EarthCoupling(null);
+                            setFeatureWorkbench(null);
+                            setBaselinesLab(null);
+                            setSequenceModels(null);
+                          }}
+                          className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
+                        />
+                      </label>
+                      <label className="grid gap-1.5">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">Stop UTC</span>
+                        <input
+                          type="datetime-local"
+                          value={historicRange.stop}
+                          onChange={event => {
+                            setHistoricRange(current => ({ ...current, stop: event.target.value }));
+                            setHistoricPlots(null);
+                            setDataQuality(null);
+                            setUnivariateEda(null);
+                            setL1EarthCoupling(null);
+                            setFeatureWorkbench(null);
+                            setBaselinesLab(null);
+                            setSequenceModels(null);
+                          }}
+                          className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <HistoricSourceSelector
+                    sources={allHistoricSources}
+                    selectedSourceIds={selectedHistoricSourceIds}
+                    showUnselected={showUnselectedHistoricSources}
+                    onToggleSource={toggleHistoricSource}
+                    onToggleShowUnselected={() => setShowUnselectedHistoricSources(current => !current)}
+                  />
+                </div>
+            )}
           </aside>
 
-          <section className="min-w-0 space-y-4">
+          <section className="min-w-0 flex-1 space-y-4">
             <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
               <div className="mb-4 flex min-w-0 items-center gap-2">
                 <Layers3 className="h-4 w-4 text-cyan-300" aria-hidden="true" />
@@ -2374,16 +2628,20 @@ export function PlaygroundDashboard({
                     L1 historic data
                   </h2>
                   <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                    Select L1 sources for model-validation extraction windows
+                    Selected L1 sources with plot-ready connector counts
                   </div>
                 </div>
               </div>
-              <SourceCatalogGrid
-                sources={historicL1Sources}
-                selectable
-                selectedSourceIds={selectedHistoricSourceIds}
-                onToggleSource={toggleHistoricSource}
-              />
+              {selectedHistoricL1Sources.length > 0 ? (
+                <SourceCatalogGrid
+                  sources={selectedHistoricL1Sources}
+                  getPlotCount={getHistoricPlotCount}
+                />
+              ) : (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
+                  No L1 source selected.
+                </div>
+              )}
             </section>
 
             <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
@@ -2394,16 +2652,20 @@ export function PlaygroundDashboard({
                     Near-Earth historic data
                   </h2>
                   <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                    Public LEO / MEO / GEO sources found for validation coverage
+                    Selected Near-Earth sources with real plot availability
                   </div>
                 </div>
               </div>
-              <SourceCatalogGrid
-                sources={historicNearEarthSources}
-                selectable
-                selectedSourceIds={selectedHistoricSourceIds}
-                onToggleSource={toggleHistoricSource}
-              />
+              {selectedHistoricNearEarthSources.length > 0 ? (
+                <SourceCatalogGrid
+                  sources={selectedHistoricNearEarthSources}
+                  getPlotCount={getHistoricPlotCount}
+                />
+              ) : (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
+                  No Near-Earth source selected.
+                </div>
+              )}
             </section>
 
             <section className="min-w-0 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
