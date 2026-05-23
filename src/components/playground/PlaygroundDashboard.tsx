@@ -62,6 +62,7 @@ import { StormBrowserPanel } from './StormBrowserPanel';
 import type { StormBrowserSnapshot } from '@/services/stormEventService';
 import { LiveForecastPanel } from './LiveForecastPanel';
 import type { LiveForecastSnapshot } from '@/services/liveForecastService';
+import type { HistoricPlotsSnapshot } from '@/services/historicPlotService';
 
 type ChartSourceRow = {
   time_tag: string;
@@ -70,7 +71,7 @@ type ChartSourceRow = {
 
 type ChartDefinition = {
   id: string;
-  spacecraftId: SpacecraftId;
+  spacecraftId: string;
   spacecraftName: string;
   source: string;
   title: string;
@@ -92,6 +93,8 @@ interface PlaygroundDashboardProps extends PlaygroundTelemetryData {
 const L1_TO_EARTH_DISTANCE_KM = 1_500_000;
 const TELEMETRY_POLL_INTERVAL_MS = 30_000;
 const PIPELINE_HEALTH_POLL_INTERVAL_MS = 60_000;
+const CHART_FRESH_SAMPLE_MS = 45 * 60 * 1000;
+const CHART_FUTURE_SAMPLE_TOLERANCE_MS = 5 * 60 * 1000;
 const PLOT_TIME_ZONE_CONFIG: Record<PlotTimeZone, { label: string; timeZone: string }> = {
   UTC: { label: 'UTC', timeZone: 'UTC' },
   CEST: { label: 'CEST', timeZone: 'Europe/Madrid' },
@@ -179,6 +182,38 @@ function parseTelemetryDate(value: string) {
   return new Date(`${value.replace(' ', 'T')}Z`);
 }
 
+function getLatestChartSampleTime(data: ChartSourceRow[]) {
+  const latestMs = data.reduce((currentLatest, point) => {
+    const parsed = point.time_tag ? parseTelemetryDate(point.time_tag) : null;
+
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      return currentLatest;
+    }
+
+    return Math.max(currentLatest, parsed.getTime());
+  }, 0);
+
+  return latestMs > 0 ? new Date(latestMs).toISOString() : null;
+}
+
+function getChartStatusFromData(data: ChartSourceRow[], fallbackStatus: SpacecraftConnectionStatus) {
+  if (fallbackStatus === 'off') {
+    return fallbackStatus;
+  }
+
+  const lastSampleTime = getLatestChartSampleTime(data);
+
+  if (!lastSampleTime) {
+    return 'off';
+  }
+
+  const sampleAgeMs = Date.now() - parseTelemetryDate(lastSampleTime).getTime();
+
+  return sampleAgeMs >= -CHART_FUTURE_SAMPLE_TOLERANCE_MS && sampleAgeMs <= CHART_FRESH_SAMPLE_MS
+    ? 'live'
+    : 'stale';
+}
+
 function formatChartTime(value: string, plotTimeZone: PlotTimeZone | undefined) {
   const timeZoneConfig = getPlotTimeZoneConfig(plotTimeZone);
 
@@ -204,12 +239,72 @@ function formatDateTime(value: string | null | undefined, plotTimeZone: PlotTime
   return date.toLocaleString('en-US', {
     month: 'short',
     day: '2-digit',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
     timeZone: getPlotTimeZoneConfig(plotTimeZone).timeZone,
   }) + ` ${getPlotTimeZoneConfig(plotTimeZone).label}`;
+}
+
+function formatCompactAge(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = parseTelemetryDate(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const diffMs = Date.now() - date.getTime();
+  const absMs = Math.abs(diffMs);
+  const suffix = diffMs >= 0 ? 'ago' : '';
+  const prefix = diffMs < 0 ? 'in ' : '';
+
+  if (absMs < 60 * 1000) {
+    return 'now';
+  }
+
+  const minutes = Math.round(absMs / (60 * 1000));
+
+  if (minutes < 60) {
+    return `${prefix}${minutes}m${suffix ? ` ${suffix}` : ''}`;
+  }
+
+  const hours = Math.round(minutes / 60);
+
+  if (hours < 48) {
+    return `${prefix}${hours}h${suffix ? ` ${suffix}` : ''}`;
+  }
+
+  const days = Math.round(hours / 24);
+
+  if (days < 60) {
+    return `${prefix}${days}d${suffix ? ` ${suffix}` : ''}`;
+  }
+
+  const months = Math.round(days / 30);
+
+  if (months < 24) {
+    return `${prefix}${months}mo${suffix ? ` ${suffix}` : ''}`;
+  }
+
+  const years = Math.round(months / 12);
+
+  return `${prefix}${years}y${suffix ? ` ${suffix}` : ''}`;
+}
+
+function formatLastSample(value: string | null | undefined, plotTimeZone: PlotTimeZone = 'UTC') {
+  if (!value) {
+    return 'Not available';
+  }
+
+  const compactAge = formatCompactAge(value);
+
+  return compactAge ? `${formatDateTime(value, plotTimeZone)} (${compactAge})` : formatDateTime(value, plotTimeZone);
 }
 
 function formatDuration(seconds: number | null) {
@@ -313,11 +408,15 @@ function SourceCatalogCard({
   selectable = false,
   selected = false,
   onToggle,
+  activeActionLabel = 'Selected',
+  inactiveActionLabel = 'Select',
 }: {
   source: PublicSpaceWeatherSource;
   selectable?: boolean;
   selected?: boolean;
   onToggle?: (sourceId: string) => void;
+  activeActionLabel?: string;
+  inactiveActionLabel?: string;
 }) {
   const content = (
     <>
@@ -406,7 +505,7 @@ function SourceCatalogCard({
           }`}>
             {selected && <Check className="h-3 w-3" aria-hidden="true" />}
           </span>
-          <span>{selected ? 'Selected' : 'Select'}</span>
+          <span>{selected ? activeActionLabel : inactiveActionLabel}</span>
         </button>
         {content}
       </article>
@@ -425,11 +524,15 @@ function SourceCatalogGrid({
   selectable = false,
   selectedSourceIds = [],
   onToggleSource,
+  activeActionLabel,
+  inactiveActionLabel,
 }: {
   sources: PublicSpaceWeatherSource[];
   selectable?: boolean;
   selectedSourceIds?: string[];
   onToggleSource?: (sourceId: string) => void;
+  activeActionLabel?: string;
+  inactiveActionLabel?: string;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
@@ -440,6 +543,8 @@ function SourceCatalogGrid({
           selectable={selectable}
           selected={selectedSourceIds.includes(source.id)}
           onToggle={onToggleSource}
+          activeActionLabel={activeActionLabel}
+          inactiveActionLabel={inactiveActionLabel}
         />
       ))}
     </div>
@@ -531,7 +636,7 @@ function MissionInfoModal({
                     <div>
                       <span className="block text-slate-600">Ultimo dato</span>
                       <span className="mt-1 block truncate text-slate-300">
-                        {mission.lastSampleTime ? formatDateTime(mission.lastSampleTime) : 'Sin muestras'}
+                        {mission.lastSampleTime ? formatLastSample(mission.lastSampleTime) : 'Sin muestras'}
                       </span>
                     </div>
                     <div>
@@ -681,7 +786,7 @@ function TelemetryChart({
           <div className={`mt-1 truncate font-mono text-[10px] ${
             definition.status === 'stale' ? 'text-amber-200/80' : 'text-slate-500'
           }`}>
-            Last sample: {definition.lastSampleTime ? formatDateTime(definition.lastSampleTime, plotTimeZone) : 'Not available'}
+            Last sample: {definition.lastSampleTime ? formatLastSample(definition.lastSampleTime, plotTimeZone) : 'Not available'}
           </div>
         </div>
         <StatusPill status={definition.status} />
@@ -757,12 +862,14 @@ export function PlaygroundDashboard({
   noaaPlasmaData: initialNoaaPlasmaData,
   noaaEphemerisData: initialNoaaEphemerisData,
   spacecraftTelemetry: initialSpacecraftTelemetry,
+  nearEarthTelemetry: initialNearEarthTelemetry,
 }: PlaygroundDashboardProps) {
   const [telemetryData, setTelemetryData] = useState<PlaygroundTelemetryData>({
     noaaMagData: initialNoaaMagData,
     noaaPlasmaData: initialNoaaPlasmaData,
     noaaEphemerisData: initialNoaaEphemerisData,
     spacecraftTelemetry: initialSpacecraftTelemetry,
+    nearEarthTelemetry: initialNearEarthTelemetry,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -793,6 +900,9 @@ export function PlaygroundDashboard({
   const [liveForecast, setLiveForecast] = useState<LiveForecastSnapshot | null>(null);
   const [isLiveForecastRefreshing, setIsLiveForecastRefreshing] = useState(false);
   const [liveForecastError, setLiveForecastError] = useState<string | null>(null);
+  const [historicPlots, setHistoricPlots] = useState<HistoricPlotsSnapshot | null>(null);
+  const [isHistoricPlotsRefreshing, setIsHistoricPlotsRefreshing] = useState(false);
+  const [historicPlotsError, setHistoricPlotsError] = useState<string | null>(null);
   const [plotTimeZone, setPlotTimeZone] = useState<PlotTimeZone>('UTC');
   const [activeTab, setActiveTab] = useState<PlaygroundTab>('insitu');
   const [isMissionInfoOpen, setIsMissionInfoOpen] = useState(false);
@@ -801,10 +911,12 @@ export function PlaygroundDashboard({
   const [selectedHistoricSourceIds, setSelectedHistoricSourceIds] = useState<string[]>([
     'omni-hro',
     'cdaweb-ace-wind-imap',
+    'swpc-goes-json',
     'ncei-goes-r-mag-seiss',
     'poes-metop-sem',
   ]);
   const [selectedNearEarthSpacecraft, setSelectedNearEarthSpacecraft] = useState<string[]>(['GOES-19']);
+  const [selectedLiveNearEarthSourceIds, setSelectedLiveNearEarthSourceIds] = useState<string[]>(['swpc-goes-json']);
   const [selectedEdaVariable, setSelectedEdaVariable] = useState('all');
   const [selectedEdaStratum, setSelectedEdaStratum] = useState<EdaStratum>('all');
   const [selectedCouplingPairId, setSelectedCouplingPairId] = useState<string | null>(null);
@@ -820,6 +932,7 @@ export function PlaygroundDashboard({
   const isSequenceModelsRequestInFlightRef = useRef(false);
   const isStormBrowserRequestInFlightRef = useRef(false);
   const isLiveForecastRequestInFlightRef = useRef(false);
+  const isHistoricPlotsRequestInFlightRef = useRef(false);
   const isMountedRef = useRef(false);
 
   const refreshTelemetry = useCallback(async (options: { showActivity?: boolean } = {}) => {
@@ -915,6 +1028,66 @@ export function PlaygroundDashboard({
       }
     }
   }, []);
+
+  const refreshHistoricPlots = useCallback(async (options: { showActivity?: boolean } = {}) => {
+    if (isHistoricPlotsRequestInFlightRef.current) {
+      return;
+    }
+
+    const startUtc = datetimeLocalToUtcIso(historicRange.start);
+    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
+
+    if (!startUtc || !stopUtc) {
+      setHistoricPlotsError('Invalid historic plot range');
+      return;
+    }
+
+    const showActivity = options.showActivity ?? true;
+    isHistoricPlotsRequestInFlightRef.current = true;
+    if (showActivity) {
+      setIsHistoricPlotsRefreshing(true);
+    }
+    setHistoricPlotsError(null);
+
+    try {
+      const params = new URLSearchParams({
+        startUtc,
+        stopUtc,
+        sourceIds: selectedHistoricSourceIds.join(','),
+      });
+      const response = await fetch(`/api/playground/historic-plots?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Historic plots request failed with ${response.status}`);
+      }
+
+      const nextHistoricPlots = await response.json() as HistoricPlotsSnapshot;
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setHistoricPlots(nextHistoricPlots);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setHistoricPlotsError(error instanceof Error ? error.message : 'Historic plots request failed');
+    } finally {
+      isHistoricPlotsRequestInFlightRef.current = false;
+
+      if (showActivity && isMountedRef.current) {
+        setIsHistoricPlotsRefreshing(false);
+      }
+    }
+  }, [historicRange.start, historicRange.stop, selectedHistoricSourceIds]);
 
   const refreshDataQuality = useCallback(async (options: { showActivity?: boolean } = {}) => {
     if (isDataQualityRequestInFlightRef.current) {
@@ -1580,10 +1753,29 @@ export function PlaygroundDashboard({
     };
   }, [activeTab, hasLiveForecast, refreshLiveForecast]);
 
+  useEffect(() => {
+    if (activeTab !== 'historic') {
+      return;
+    }
+
+    const refreshTimeout = window.setTimeout(() => {
+      void refreshHistoricPlots({ showActivity: true });
+    }, 350);
+
+    return () => window.clearTimeout(refreshTimeout);
+  }, [
+    activeTab,
+    historicRange.start,
+    historicRange.stop,
+    selectedHistoricSourceIds,
+    refreshHistoricPlots,
+  ]);
+
   const {
     noaaMagData,
     noaaPlasmaData,
     spacecraftTelemetry,
+    nearEarthTelemetry,
   } = telemetryData;
 
   const speedKmS = parseMetric(noaaPlasmaData.latestData?.speed);
@@ -1603,6 +1795,7 @@ export function PlaygroundDashboard({
   }, []);
 
   const toggleHistoricSource = useCallback((sourceId: string) => {
+    setHistoricPlots(null);
     setSelectedHistoricSourceIds(currentSelection => (
       currentSelection.includes(sourceId)
         ? currentSelection.filter(currentId => currentId !== sourceId)
@@ -1618,6 +1811,14 @@ export function PlaygroundDashboard({
     ));
   }, []);
 
+  const toggleLiveNearEarthSource = useCallback((sourceId: string) => {
+    setSelectedLiveNearEarthSourceIds(currentSelection => (
+      currentSelection.includes(sourceId)
+        ? currentSelection.filter(currentId => currentId !== sourceId)
+        : [...currentSelection, sourceId]
+    ));
+  }, []);
+
   const selectedSpacecraft = useMemo(
     () => spacecraftTelemetry.filter(mission => selectedSpacecraftIds.includes(mission.id)),
     [selectedSpacecraftIds, spacecraftTelemetry],
@@ -1625,19 +1826,23 @@ export function PlaygroundDashboard({
 
   const chartDefinitions = useMemo<ChartDefinition[]>(
     () => selectedSpacecraft.flatMap(mission =>
-      mission.charts.map(chart => ({
-        id: chart.id,
-        spacecraftId: mission.id,
-        spacecraftName: mission.displayName,
-        source: mission.source,
-        title: chart.title,
-        unit: chart.unit,
-        dataKey: 'value' as const,
-        color: chart.color,
-        data: chart.data,
-        status: mission.status,
-        lastSampleTime: mission.lastSampleTime,
-      })),
+      mission.charts.map(chart => {
+        const chartLastSampleTime = getLatestChartSampleTime(chart.data);
+
+        return {
+          id: chart.id,
+          spacecraftId: mission.id,
+          spacecraftName: mission.displayName,
+          source: mission.source,
+          title: chart.title,
+          unit: chart.unit,
+          dataKey: 'value' as const,
+          color: chart.color,
+          data: chart.data,
+          status: getChartStatusFromData(chart.data, mission.status),
+          lastSampleTime: chartLastSampleTime ?? mission.lastSampleTime,
+        };
+      }),
     ),
     [selectedSpacecraft],
   );
@@ -1651,7 +1856,7 @@ export function PlaygroundDashboard({
     [],
   );
   const historicNearEarthSources = useMemo(
-    () => NEAR_EARTH_PUBLIC_SOURCES.filter(source => source.cadence !== 'live'),
+    () => NEAR_EARTH_PUBLIC_SOURCES.filter(source => source.cadence !== 'live' || source.id === 'swpc-goes-json'),
     [],
   );
   const nearEarthSpacecraftOptions = useMemo(
@@ -1666,12 +1871,65 @@ export function PlaygroundDashboard({
       ),
     [liveNearEarthSources, selectedNearEarthSpacecraft],
   );
+  const selectedNearEarthFeeds = useMemo(
+    () => nearEarthTelemetry.filter(feed => selectedLiveNearEarthSourceIds.includes(feed.sourceId)),
+    [nearEarthTelemetry, selectedLiveNearEarthSourceIds],
+  );
+  const nearEarthChartDefinitions = useMemo<ChartDefinition[]>(
+    () => selectedNearEarthFeeds.flatMap(feed =>
+      feed.charts
+        .filter(chart => (
+          selectedNearEarthSpacecraft.length === 0 ||
+          selectedNearEarthSpacecraft.includes(chart.spacecraft)
+        ))
+        .map(chart => {
+          const chartLastSampleTime = getLatestChartSampleTime(chart.data);
+
+          return {
+            id: chart.id,
+            spacecraftId: `${feed.id}:${chart.spacecraft}`,
+            spacecraftName: chart.spacecraft,
+            source: feed.source,
+            title: chart.title,
+            unit: chart.unit,
+            dataKey: 'value' as const,
+            color: chart.color,
+            data: chart.data,
+            status: getChartStatusFromData(chart.data, feed.status),
+            lastSampleTime: chartLastSampleTime ?? feed.lastSampleTime,
+          };
+        }),
+    ),
+    [selectedNearEarthFeeds, selectedNearEarthSpacecraft],
+  );
+  const selectedNearEarthFeedErrors = useMemo(
+    () => selectedNearEarthFeeds
+      .map(feed => feed.errorMessage)
+      .filter((message): message is string => Boolean(message)),
+    [selectedNearEarthFeeds],
+  );
   const selectedHistoricSources = useMemo(
     () =>
       [...historicL1Sources, ...historicNearEarthSources].filter(source =>
         selectedHistoricSourceIds.includes(source.id),
       ),
     [historicL1Sources, historicNearEarthSources, selectedHistoricSourceIds],
+  );
+  const historicChartDefinitions = useMemo<ChartDefinition[]>(
+    () => (historicPlots?.charts ?? []).map(chart => ({
+      id: chart.id,
+      spacecraftId: chart.sourceId,
+      spacecraftName: chart.spacecraftName,
+      source: chart.source,
+      title: chart.title,
+      unit: chart.unit,
+      dataKey: 'value' as const,
+      color: chart.color,
+      data: chart.data,
+      status: getChartStatusFromData(chart.data, 'stale'),
+      lastSampleTime: chart.lastSampleTime,
+    })),
+    [historicPlots],
   );
 
   return (
@@ -1819,7 +2077,7 @@ export function PlaygroundDashboard({
                       <span className={`mt-2 block truncate font-mono text-[10px] ${
                         mission.status === 'stale' ? 'text-amber-200/80' : 'text-slate-500'
                       }`}>
-                        Last: {mission.lastSampleTime ? formatDateTime(mission.lastSampleTime) : 'No samples'}
+                        Last: {mission.lastSampleTime ? formatLastSample(mission.lastSampleTime) : 'No samples'}
                       </span>
                       <span className="mt-2 flex flex-wrap gap-1.5">
                         {mission.variables.slice(0, 5).map(variable => (
@@ -1933,7 +2191,7 @@ export function PlaygroundDashboard({
                       Near-Earth public feeds
                     </h2>
                     <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
-                      LEO / MEO / GEO source map for the next chart integration
+                      LEO / MEO / GEO sources; plot-ready feeds can be selected below
                     </div>
                   </div>
                 </div>
@@ -1960,10 +2218,64 @@ export function PlaygroundDashboard({
                 </div>
               </div>
               {filteredLiveNearEarthSources.length > 0 ? (
-                <SourceCatalogGrid sources={filteredLiveNearEarthSources} />
+                <SourceCatalogGrid
+                  sources={filteredLiveNearEarthSources}
+                  selectable
+                  selectedSourceIds={selectedLiveNearEarthSourceIds}
+                  onToggleSource={toggleLiveNearEarthSource}
+                  activeActionLabel="Plotted"
+                  inactiveActionLabel="Plot"
+                />
               ) : (
                 <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
                   No near-Earth live source matches the selected spacecraft filter.
+                </div>
+              )}
+            </section>
+
+            <section className="min-w-0 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Satellite className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <h2 className="truncate text-xs font-semibold uppercase tracking-widest text-slate-300">
+                      Near-Earth telemetry plots
+                    </h2>
+                    <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                      6h SWPC GOES JSON series filtered by selected spacecraft
+                    </div>
+                  </div>
+                </div>
+                {selectedNearEarthFeedErrors.length > 0 && (
+                  <div
+                    className="max-w-full truncate font-mono text-[10px] uppercase tracking-widest text-amber-200/80 sm:max-w-96"
+                    title={selectedNearEarthFeedErrors.join(' | ')}
+                  >
+                    Partial feed warning
+                  </div>
+                )}
+              </div>
+
+              {nearEarthChartDefinitions.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                  {nearEarthChartDefinitions.map((definition) => (
+                    <TelemetryChart
+                      key={definition.id}
+                      definition={definition}
+                      plotTimeZone={plotTimeZone}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center">
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                      No plot-ready near-Earth feed selected
+                    </div>
+                    <div className="mt-2 text-sm text-slate-400">
+                      Select GOES primary/secondary JSON and keep GOES-18 or GOES-19 enabled.
+                    </div>
+                  </div>
                 </div>
               )}
             </section>
@@ -1987,6 +2299,7 @@ export function PlaygroundDashboard({
                     value={historicRange.start}
                     onChange={event => {
                       setHistoricRange(current => ({ ...current, start: event.target.value }));
+                      setHistoricPlots(null);
                       setDataQuality(null);
                       setUnivariateEda(null);
                       setL1EarthCoupling(null);
@@ -2004,6 +2317,7 @@ export function PlaygroundDashboard({
                     value={historicRange.stop}
                     onChange={event => {
                       setHistoricRange(current => ({ ...current, stop: event.target.value }));
+                      setHistoricPlots(null);
                       setDataQuality(null);
                       setUnivariateEda(null);
                       setL1EarthCoupling(null);
@@ -2090,6 +2404,81 @@ export function PlaygroundDashboard({
                 selectedSourceIds={selectedHistoricSourceIds}
                 onToggleSource={toggleHistoricSource}
               />
+            </section>
+
+            <section className="min-w-0 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Database className="h-4 w-4 text-cyan-300" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <h2 className="truncate text-xs font-semibold uppercase tracking-widest text-slate-300">
+                      Historic telemetry plots
+                    </h2>
+                    <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                      Plots available for selected sources and UTC window
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshHistoricPlots({ showActivity: true });
+                  }}
+                  className="flex h-9 items-center gap-2 rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 text-xs text-cyan-100 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 disabled:cursor-wait disabled:text-slate-500"
+                  disabled={isHistoricPlotsRefreshing}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isHistoricPlotsRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                  <span>{isHistoricPlotsRefreshing ? 'Loading' : 'Load plots'}</span>
+                </button>
+              </div>
+
+              {historicPlotsError && (
+                <div className="mb-3 rounded-md border border-rose-400/25 bg-rose-400/10 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-rose-200">
+                  {historicPlotsError}
+                </div>
+              )}
+
+              {historicPlots?.warnings && historicPlots.warnings.length > 0 && (
+                <div className="mb-3 grid gap-2">
+                  {historicPlots.warnings.slice(0, 4).map(warning => (
+                    <div
+                      key={warning}
+                      className="rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs text-amber-100/90"
+                    >
+                      {warning}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {isHistoricPlotsRefreshing && !historicPlots ? (
+                <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-slate-800 bg-slate-950/50 p-6">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                    Loading historic plots
+                  </div>
+                </div>
+              ) : historicChartDefinitions.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                  {historicChartDefinitions.map((definition) => (
+                    <TelemetryChart
+                      key={definition.id}
+                      definition={definition}
+                      plotTimeZone={plotTimeZone}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-slate-800 bg-slate-950/50 p-6 text-center">
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                      No plot data for this selection
+                    </div>
+                    <div className="mt-2 max-w-xl text-sm text-slate-400">
+                      Select a plot-ready source such as ACE / WIND / IMAP HAPI, OMNI HRO, or GOES primary/secondary JSON. Archive-only sources remain in the catalog until their file parsers are wired.
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           </section>
         </main>

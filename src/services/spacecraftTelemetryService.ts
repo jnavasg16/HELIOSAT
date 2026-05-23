@@ -66,6 +66,7 @@ interface BuildSpacecraftTelemetryInput {
 const HAPI_BASE_URL = 'https://cdaweb.gsfc.nasa.gov/hapi';
 const HAPI_WINDOW_MS = 2 * 60 * 60 * 1000;
 const FRESH_SAMPLE_MS = 45 * 60 * 1000;
+const FUTURE_SAMPLE_TOLERANCE_MS = 5 * 60 * 1000;
 const HAPI_CACHE_MS = 10 * 60 * 1000;
 const HAPI_REQUEST_TIMEOUT_MS = 8000;
 const EARTH_RADIUS_KM = 6378;
@@ -168,7 +169,10 @@ function getStatusFromCharts(charts: SpacecraftChartSeries[]) {
   }
 
   const parsed = parseTimestamp(lastSampleTime);
-  const isFresh = parsed ? Date.now() - parsed.getTime() <= FRESH_SAMPLE_MS : false;
+  const sampleAgeMs = parsed ? Date.now() - parsed.getTime() : null;
+  const isFresh = sampleAgeMs !== null
+    && sampleAgeMs >= -FUTURE_SAMPLE_TOLERANCE_MS
+    && sampleAgeMs <= FRESH_SAMPLE_MS;
 
   return {
     status: isFresh ? 'live' as const : 'stale' as const,
@@ -272,7 +276,7 @@ function buildDscovrTelemetry({
   plasmaData,
   ephemerisData,
 }: BuildSpacecraftTelemetryInput): SpacecraftTelemetry {
-  const charts: SpacecraftChartSeries[] = [
+  const magCharts: SpacecraftChartSeries[] = [
     {
       id: 'dscovr-bt',
       title: 'BT',
@@ -301,6 +305,8 @@ function buildDscovrTelemetry({
       color: COLOR.bz,
       data: magData.timeSeries.map(point => ({ time_tag: point.time_tag, value: point.bz_gsm })),
     },
+  ];
+  const plasmaCharts: SpacecraftChartSeries[] = [
     {
       id: 'dscovr-speed',
       title: 'Speed',
@@ -322,6 +328,8 @@ function buildDscovrTelemetry({
       color: COLOR.temperature,
       data: plasmaData.timeSeries.map(point => ({ time_tag: point.time_tag, value: point.temperature })),
     },
+  ];
+  const ephemerisCharts: SpacecraftChartSeries[] = [
     {
       id: 'dscovr-x-gse',
       title: 'X GSE',
@@ -344,7 +352,9 @@ function buildDscovrTelemetry({
       data: ephemerisData.timeSeries.map(point => ({ time_tag: point.time_tag, value: point.z_gse })),
     },
   ];
-  const status = getStatusFromCharts(charts);
+  const telemetryCharts = [...magCharts, ...plasmaCharts];
+  const charts = [...telemetryCharts, ...ephemerisCharts];
+  const status = getStatusFromCharts(telemetryCharts);
 
   return {
     id: 'DSCOVR',

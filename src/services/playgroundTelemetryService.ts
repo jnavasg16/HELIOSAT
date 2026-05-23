@@ -1,4 +1,5 @@
 import { fetchSpacecraftTelemetry, type SpacecraftTelemetry } from './spacecraftTelemetryService';
+import { fetchNearEarthTelemetry, type NearEarthTelemetryFeed } from './nearEarthTelemetryService';
 import {
   fetchNoaaEphemerisData,
   fetchNoaaMagnetometerData,
@@ -14,14 +15,16 @@ export interface PlaygroundTelemetryData {
   noaaPlasmaData: NoaaServiceResponse<NoaaPlasmaData>;
   noaaEphemerisData: NoaaServiceResponse<NoaaEphemerisData>;
   spacecraftTelemetry: SpacecraftTelemetry[];
+  nearEarthTelemetry: NearEarthTelemetryFeed[];
 }
 
 export async function fetchPlaygroundTelemetry(): Promise<PlaygroundTelemetryData> {
-  const [noaaMagData, noaaPlasmaData, noaaEphemerisData] =
+  const [noaaMagData, noaaPlasmaData, noaaEphemerisData, nearEarthTelemetry] =
     await Promise.all([
       fetchNoaaMagnetometerData(),
       fetchNoaaPlasmaData(),
       fetchNoaaEphemerisData(),
+      fetchNearEarthTelemetry(),
     ]);
   const spacecraftTelemetry = await fetchSpacecraftTelemetry({
     magData: noaaMagData,
@@ -34,5 +37,6 @@ export async function fetchPlaygroundTelemetry(): Promise<PlaygroundTelemetryDat
     noaaPlasmaData,
     noaaEphemerisData,
     spacecraftTelemetry,
+    nearEarthTelemetry,
   };
 }
