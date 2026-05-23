@@ -42,6 +42,7 @@ const PROTOCOL_BY_SOURCE_ID: Record<string, ConnectorProtocol> = {
 const WIRED_SOURCE_IDS = new Set([
   'swpc-rtsw-l1',
   'cdaweb-ace-wind-imap',
+  'swpc-goes-json',
 ]);
 
 export const SPACE_WEATHER_CONNECTOR_REGISTRY: SourceConnectorRegistration[] =

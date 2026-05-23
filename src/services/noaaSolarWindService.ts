@@ -42,6 +42,31 @@ export interface NoaaServiceResponse<T> {
 const NOAA_MAG_ENDPOINT = 'https://services.swpc.noaa.gov/products/solar-wind/mag-2-hour.json';
 const NOAA_PLASMA_ENDPOINT = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json';
 const NOAA_EPHEMERIS_ENDPOINT = 'https://services.swpc.noaa.gov/products/solar-wind/ephemerides.json';
+const NOAA_LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
+const NOAA_FUTURE_SAMPLE_TOLERANCE_MS = 5 * 60 * 1000;
+
+function parseNoaaTimeTag(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(`${value.replace(' ', 'T')}Z`);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isInNoaaLiveWindow(value: string | null | undefined, nowMs = Date.now()) {
+  const parsed = parseNoaaTimeTag(value);
+
+  if (!parsed) {
+    return false;
+  }
+
+  const sampleAgeMs = nowMs - parsed.getTime();
+
+  return sampleAgeMs >= -NOAA_FUTURE_SAMPLE_TOLERANCE_MS
+    && sampleAgeMs <= NOAA_LIVE_WINDOW_MS;
+}
 
 export async function fetchNoaaMagnetometerData(): Promise<NoaaServiceResponse<NoaaMagnetometerData>> {
   try {
@@ -253,11 +278,18 @@ export async function fetchNoaaEphemerisData(): Promise<NoaaServiceResponse<Noaa
     }
 
     const timeSeries: NoaaEphemerisData[] = [];
+    const nowMs = Date.now();
 
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
+      const timeTag = row[timeIdx];
+
+      if (!isInNoaaLiveWindow(timeTag, nowMs)) {
+        continue;
+      }
+
       timeSeries.push({
-        time_tag: row[timeIdx],
+        time_tag: timeTag,
         x_gse: xGseIdx !== -1 ? row[xGseIdx] : null,
         y_gse: yGseIdx !== -1 ? row[yGseIdx] : null,
         z_gse: zGseIdx !== -1 ? row[zGseIdx] : null,
