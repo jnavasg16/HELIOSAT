@@ -1,0 +1,117 @@
+version: 1
+schema:
+  native_name: string
+  canonical_name: string
+  unit: string
+  coordinate_system: string|null
+  notes: string
+
+variables:
+  - canonical_name: bx_gsm
+    label: "Bx GSM"
+    unit: "nT"
+    aliases:
+      DSCOVR_RTSW: ["bx_gsm"]
+      ACE_HAPI: ["BGSMc.x", "BGSEc.x"]
+      WIND_HAPI: ["BGSMc.x"]
+      IMAP_HAPI: ["mag_B_GSM.x"]
+      OMNI_HRO: ["BX_GSM", "BX_GSE"]
+    notes: "Prefer GSM when available; preserve native coordinate metadata during ingestion."
+
+  - canonical_name: by_gsm
+    label: "By GSM"
+    unit: "nT"
+    aliases:
+      DSCOVR_RTSW: ["by_gsm"]
+      ACE_HAPI: ["BGSMc.y", "BGSEc.y"]
+      WIND_HAPI: ["BGSMc.y"]
+      IMAP_HAPI: ["mag_B_GSM.y"]
+      OMNI_HRO: ["BY_GSM", "BY_GSE"]
+    notes: "Prefer GSM when available; preserve native coordinate metadata during ingestion."
+
+  - canonical_name: bz_gsm
+    label: "Bz GSM"
+    unit: "nT"
+    aliases:
+      DSCOVR_RTSW: ["bz_gsm"]
+      ACE_HAPI: ["BGSMc.z", "BGSEc.z"]
+      WIND_HAPI: ["BGSMc.z"]
+      IMAP_HAPI: ["mag_B_GSM.z"]
+      OMNI_HRO: ["BZ_GSM", "BZ_GSE"]
+    notes: "Maps the common Bz source names used by DSCOVR, ACE, WIND, IMAP, and OMNI."
+
+  - canonical_name: b_total
+    label: "|B|"
+    unit: "nT"
+    aliases:
+      DSCOVR_RTSW: ["bt"]
+      ACE_HAPI: ["Magnitude"]
+      WIND_HAPI: ["BF1"]
+      IMAP_HAPI: ["mag_B_magnitude"]
+      OMNI_HRO: ["ABS_B", "B"]
+    notes: "Magnetic-field magnitude."
+
+  - canonical_name: solar_wind_speed
+    label: "V"
+    unit: "km/s"
+    aliases:
+      DSCOVR_RTSW: ["speed"]
+      ACE_HAPI: ["Vp"]
+      WIND_HAPI: ["V_GSE", "THERMAL_SPD"]
+      IMAP_HAPI: ["swapi_pseudo_proton_speed"]
+      OMNI_HRO: ["flow_speed", "V"]
+    notes: "Bulk solar-wind speed; thermal speed remains a separate native variable."
+
+  - canonical_name: proton_density
+    label: "Np"
+    unit: "cm^-3"
+    aliases:
+      DSCOVR_RTSW: ["density"]
+      ACE_HAPI: ["Np"]
+      WIND_HAPI: ["Np"]
+      IMAP_HAPI: ["swapi_pseudo_proton_density"]
+      OMNI_HRO: ["proton_density", "N"]
+    notes: "Solar-wind proton number density."
+
+  - canonical_name: proton_temperature
+    label: "Tp"
+    unit: "K"
+    aliases:
+      DSCOVR_RTSW: ["temperature"]
+      ACE_HAPI: ["Tpr"]
+      WIND_HAPI: ["THERMAL_SPD"]
+      IMAP_HAPI: ["swapi_pseudo_proton_temperature"]
+      OMNI_HRO: ["T", "proton_temperature"]
+    notes: "Preserve native temperature representation; WIND thermal speed requires explicit conversion before using this canonical name."
+
+  - canonical_name: dynamic_pressure
+    label: "Dynamic pressure"
+    unit: "nPa"
+    aliases:
+      OMNI_HRO: ["Pressure", "flow_pressure", "Pdyn"]
+      DERIVED: ["proton_density+solar_wind_speed"]
+    notes: "May be directly ingested from OMNI or derived from density and speed with derivation metadata."
+
+  - canonical_name: electric_field
+    label: "Electric field"
+    unit: "mV/m"
+    aliases:
+      OMNI_HRO: ["E", "electric_field"]
+      DERIVED: ["solar_wind_speed*bz_gsm"]
+    notes: "Usually derived coupling electric field unless the source provides it directly."
+
+  - canonical_name: kp
+    label: "Kp"
+    unit: "index"
+    aliases:
+      OMNI_HRO: ["Kp", "KP"]
+      NOAA_SWPC: ["planetary_k_index", "kp_index"]
+    notes: "Planetary K index."
+
+  - canonical_name: dst
+    label: "Dst"
+    unit: "nT"
+    aliases:
+      OMNI_HRO: ["Dst", "DST"]
+      WDC_KYOTO: ["Dst"]
+    notes: "Disturbance storm time index."
