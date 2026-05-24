@@ -67,6 +67,8 @@ import type { StormBrowserSnapshot } from '@/services/stormEventService';
 import { LiveForecastPanel } from './LiveForecastPanel';
 import type { LiveForecastSnapshot } from '@/services/liveForecastService';
 import type { HistoricPlotsSnapshot } from '@/services/historicPlotService';
+import { InSituOrbitScene } from './InSituOrbitScene';
+import { HistoricOrbitScene } from './HistoricOrbitScene';
 
 type ChartSourceRow = {
   time_tag: string;
@@ -118,6 +120,7 @@ const PLAYGROUND_TABS: Array<{ id: PlaygroundTab; label: string; description: st
 ];
 const HISTORIC_PLOT_COUNT_BY_SOURCE_ID: Record<string, number> = {
   'cdaweb-ace-wind-imap': 16,
+  'ncei-dscovr-archive': 1,
   'omni-hro': 7,
   'swpc-goes-json': 12,
 };
@@ -2532,6 +2535,14 @@ export function PlaygroundDashboard({
                 </div>
               )}
             </section>
+
+            <InSituOrbitScene
+              spacecraftTelemetry={spacecraftTelemetry}
+              selectedSpacecraftIds={selectedSpacecraftIds}
+              nearEarthTelemetry={nearEarthTelemetry}
+              selectedLiveNearEarthSourceIds={selectedLiveNearEarthSourceIds}
+              selectedNearEarthSpacecraft={selectedNearEarthSpacecraft}
+            />
           </section>
         </main>
       ) : activeTab === 'historic' ? (
@@ -2667,6 +2678,11 @@ export function PlaygroundDashboard({
                 </div>
               )}
             </section>
+
+            <HistoricOrbitScene
+              snapshot={historicPlots}
+              isLoading={isHistoricPlotsRefreshing}
+            />
 
             <section className="min-w-0 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
