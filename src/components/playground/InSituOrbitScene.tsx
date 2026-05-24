@@ -19,10 +19,10 @@ const EARTH_RADIUS_KM = 6371;
 const GEO_ALTITUDE_KM = 35786;
 const GEO_RADIUS_KM = EARTH_RADIUS_KM + GEO_ALTITUDE_KM;
 const GEOMETRY_REFRESH_MS = 60_000;
-const EARTH_DAY_TEXTURE_URL = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg';
-const EARTH_NIGHT_TEXTURE_URL = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
-const EARTH_BUMP_TEXTURE_URL = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png';
-const EARTH_CLOUDS_TEXTURE_URL = 'https://cdn.jsdelivr.net/npm/three-globe/example/clouds/clouds.png';
+const EARTH_DAY_TEXTURE_URL = '/earth/earth-blue-marble.jpg';
+const EARTH_NIGHT_TEXTURE_URL = '/earth/earth-night.jpg';
+const EARTH_BUMP_TEXTURE_URL = '/earth/earth-topology.png';
+const EARTH_CLOUDS_TEXTURE_URL = '/earth/clouds.png';
 
 const GOES_NOMINAL_LONGITUDE_DEG: Record<string, number> = {
   'GOES-18': -137.0,
@@ -457,6 +457,9 @@ function useEarthTextures() {
       const texture = await loader.loadAsync(url);
       texture.colorSpace = colorSpace ?? THREE.NoColorSpace;
       texture.anisotropy = 8;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.needsUpdate = true;
       loadedTextures.push(texture);
 
       return texture;
@@ -499,25 +502,15 @@ export function EarthModel() {
         <mesh>
           <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
           <meshStandardMaterial
-            color={textures.day ? '#ffffff' : '#0f766e'}
+            color={textures.day ? '#ffffff' : '#0b2545'}
             map={textures.day}
             bumpMap={textures.bump}
-            bumpScale={0.028}
-            emissive="#111827"
+            bumpScale={0.016}
+            emissive="#020617"
             emissiveMap={textures.night}
-            emissiveIntensity={textures.night ? 0.34 : 0.16}
-            roughness={0.92}
+            emissiveIntensity={textures.night ? 0.22 : 0.08}
+            roughness={0.86}
             metalness={0.04}
-          />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[EARTH_RADIUS + 0.008, 64, 64]} />
-          <meshStandardMaterial
-            color="#7dd3fc"
-            transparent
-            opacity={0.06}
-            wireframe
-            roughness={1}
           />
         </mesh>
       </group>
@@ -526,11 +519,13 @@ export function EarthModel() {
         <mesh>
           <sphereGeometry args={[EARTH_RADIUS + 0.024, 96, 96]} />
           <meshStandardMaterial
-            map={textures.clouds}
+            color="#ffffff"
+            alphaMap={textures.clouds}
             transparent
-            opacity={0.28}
-            alphaTest={0.06}
+            opacity={0.42}
+            alphaTest={0.18}
             depthWrite={false}
+            blending={THREE.AdditiveBlending}
             roughness={1}
           />
         </mesh>
@@ -541,14 +536,14 @@ export function EarthModel() {
         color="#fde68a"
         lineWidth={1}
         transparent
-        opacity={0.46}
+        opacity={0.24}
       />
       <Line
         points={circlePoints(EARTH_RADIUS + 0.024, 'xz')}
         color="#38bdf8"
         lineWidth={1}
         transparent
-        opacity={0.22}
+        opacity={0.14}
       />
 
       <mesh>
@@ -567,8 +562,8 @@ export function EarthModel() {
 export function SunVector() {
   return (
     <group>
-      <pointLight position={[5.4, 1.4, 0.8]} intensity={14} color="#fef3c7" distance={8} />
-      <directionalLight position={[5.4, 1.4, 0.8]} intensity={3.2} color="#fde68a" />
+      <pointLight position={[5.4, 1.4, 0.8]} intensity={7.5} color="#ffffff" distance={8} />
+      <directionalLight position={[5.4, 1.4, 0.8]} intensity={2.35} color="#f8fbff" />
       <group position={[4.15, 1.08, 0.22]}>
         <mesh>
           <sphereGeometry args={[0.075, 24, 24]} />
