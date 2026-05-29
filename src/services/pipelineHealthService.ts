@@ -9,9 +9,13 @@ import type {
   SpacecraftTelemetry,
 } from './spacecraftTelemetryService';
 import { getSourceConnectorRegistration } from './pipeline/connectorRegistry';
+import {
+  getNceiGoesArchiveHealthObservation,
+  NCEI_GOES_SOURCE_ID,
+} from './pipeline/nceiGoesArchiveConnector';
 
 export type PipelineSourceGroup = 'l1-live' | 'l1-historic' | 'near-earth';
-export type PipelineSourceStatus = 'live' | 'stale' | 'off' | 'error';
+export type PipelineSourceStatus = 'live' | 'historic' | 'stale' | 'off' | 'error';
 export type PipelineLogLevel = 'info' | 'warning' | 'error';
 
 export interface PipelineSparkPoint {
@@ -79,6 +83,9 @@ interface RuntimeObservation {
   rowsInCurrentSnapshot: number | null;
   cadenceSeconds: number | null;
   lastErrorMessage: string | null;
+  coverage?: PipelineCoverageMetric[];
+  throughputRowsPerMinute?: number | null;
+  errorRate24hPercent?: number | null;
 }
 
 const HEALTH_WINDOWS: PipelineCoverageMetric['window'][] = ['24h', '7d', '30d'];
@@ -254,6 +261,27 @@ function getRuntimeObservationForSource(
   source: PublicSpaceWeatherSource,
   spacecraftTelemetry: SpacecraftTelemetry[],
 ) {
+  if (source.id === NCEI_GOES_SOURCE_ID) {
+    const archiveObservation = getNceiGoesArchiveHealthObservation();
+
+    if (!archiveObservation) {
+      return null;
+    }
+
+    return {
+      status: archiveObservation.status,
+      lastSampleTimestampUtc: archiveObservation.lastSampleTimestampUtc,
+      sampleTimestampsMs: archiveObservation.sampleTimestampsMs,
+      rowTimestampsMs: archiveObservation.rowTimestampsMs,
+      rowsInCurrentSnapshot: archiveObservation.rowsInCurrentSnapshot,
+      cadenceSeconds: archiveObservation.cadenceSeconds,
+      lastErrorMessage: archiveObservation.lastErrorMessage,
+      coverage: archiveObservation.coverage,
+      throughputRowsPerMinute: archiveObservation.throughputRowsPerMinute,
+      errorRate24hPercent: archiveObservation.errorRate24hPercent,
+    } satisfies RuntimeObservation;
+  }
+
   const missionById = new Map<SpacecraftId, SpacecraftTelemetry>(
     spacecraftTelemetry.map(mission => [mission.id, mission]),
   );
@@ -345,6 +373,10 @@ function calculateThroughputRowsPerMinute(rowTimestampsMs: number[]) {
 function getCurrentLogMessage(source: PublicSpaceWeatherSource, observation: RuntimeObservation | null) {
   if (!observation) {
     return 'Connector registered; no runtime ingestion observations in this process yet.';
+  }
+
+  if (observation.status === 'historic') {
+    return 'Local archive checkpoint reports ingested GOES-R NetCDF files and Parquet partitions.';
   }
 
   if (observation.status === 'error') {
@@ -463,16 +495,17 @@ export function buildPipelineHealthSnapshot(
         lastSampleDeltaSeconds: lastSampleTimestampMs === null
           ? null
           : Math.max(0, (nowMs - lastSampleTimestampMs) / 1000),
-        coverage: buildCoverage(
+        coverage: runtimeObservation?.coverage ?? buildCoverage(
           runtimeObservation?.sampleTimestampsMs ?? [],
           runtimeObservation?.cadenceSeconds ?? null,
           nowMs,
         ),
-        errorRate24hPercent: null,
+        errorRate24hPercent: runtimeObservation?.errorRate24hPercent ?? null,
         errorRateSparkline: [],
-        throughputRowsPerMinute: runtimeObservation
-          ? calculateThroughputRowsPerMinute(runtimeObservation.rowTimestampsMs)
-          : null,
+        throughputRowsPerMinute: runtimeObservation?.throughputRowsPerMinute
+          ?? (runtimeObservation
+            ? calculateThroughputRowsPerMinute(runtimeObservation.rowTimestampsMs)
+            : null),
         throughputSparkline: buildThroughputSparkline(runtimeObservation?.rowTimestampsMs ?? [], nowMs),
         cadenceSeconds: runtimeObservation?.cadenceSeconds ?? null,
         rowsInCurrentSnapshot: runtimeObservation?.rowsInCurrentSnapshot ?? null,
@@ -508,7 +541,7 @@ export function buildPipelineHealthSnapshot(
 
       return {
         ...health,
-        errorRate24hPercent: calculateErrorRate24h(sourceLogs, nowMs),
+        errorRate24hPercent: health.errorRate24hPercent ?? calculateErrorRate24h(sourceLogs, nowMs),
         errorRateSparkline: buildErrorSparkline(sourceLogs, nowMs),
         logs: sourceLogs.slice(0, MAX_LOGS_PER_SOURCE),
       };

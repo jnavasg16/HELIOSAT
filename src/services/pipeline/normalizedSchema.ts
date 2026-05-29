@@ -3,6 +3,7 @@ export type QualityFlag = number;
 export interface NormalizedSpaceWeatherRow {
   timestamp_utc: string;
   source: string;
+  spacecraft_id?: string;
   mission: string;
   instrument: string;
   variable: string;
@@ -10,6 +11,8 @@ export interface NormalizedSpaceWeatherRow {
   quality_flag: QualityFlag;
   unit: string;
   cadence_s: number;
+  native_product?: string;
+  native_variable?: string;
 }
 
 export interface NormalizedDataFrame {

@@ -51,6 +51,12 @@ const STATUS_META: Record<PipelineSourceStatus, {
     icon: CheckCircle2,
     sparkColor: '#34d399',
   },
+  historic: {
+    label: 'HISTORIC',
+    className: 'border-cyan-300/30 bg-cyan-300/10 text-cyan-100',
+    icon: Archive,
+    sparkColor: '#22d3ee',
+  },
   stale: {
     label: 'STALE',
     className: 'border-amber-300/30 bg-amber-300/10 text-amber-100',
@@ -285,13 +291,13 @@ function PipelineSourceCard({
 
       <span className="mt-3 flex min-w-0 flex-wrap gap-1.5">
         <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-400">
-          {source.protocol}
+          {source.protocol.toUpperCase()}
         </span>
         <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-400">
-          {source.implementationStatus}
+          {source.implementationStatus.toUpperCase()}
         </span>
         <span className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-400">
-          {source.refreshMode}
+          {source.refreshMode.toUpperCase()}
         </span>
       </span>
     </button>
