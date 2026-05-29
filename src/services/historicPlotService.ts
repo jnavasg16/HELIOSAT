@@ -73,7 +73,7 @@ interface HapiDataResponse {
   };
 }
 
-interface HapiSeriesResult {
+export interface HapiSeriesResult {
   rows: unknown[][];
   warnings: string[];
 }
@@ -214,7 +214,7 @@ function clampRangeToMaxDuration(range: HistoricPlotRange, maxDurationMs: number
   };
 }
 
-function toFiniteNumber(value: unknown) {
+export function toFiniteNumber(value: unknown) {
   if (typeof value === 'number') {
     return Number.isFinite(value) && Math.abs(value) < 1e30 ? value : null;
   }
@@ -376,7 +376,7 @@ async function fetchJsonWithRetry(url: string): Promise<unknown> {
   throw lastError ?? new Error('Request failed');
 }
 
-async function fetchHapiSeries(
+export async function fetchHapiSeries(
   datasetId: string,
   parameters: string[],
   range: HistoricPlotRange,

@@ -4,7 +4,10 @@ import {
   buildDataQualitySnapshot,
   buildNormalizedRowsFromTelemetry,
 } from '@/services/dataQualityService';
-import { buildFeatureWorkbenchSnapshot } from '@/services/featureEngineeringService';
+import {
+  buildFeatureWorkbenchSnapshot,
+  type FeatureTargetConfig,
+} from '@/services/featureEngineeringService';
 import {
   buildL1EarthCouplingSnapshot,
 } from '@/services/l1EarthCouplingService';
@@ -44,7 +47,19 @@ export async function GET(request: NextRequest) {
 
   const startUtc = request.nextUrl.searchParams.get('startUtc') ?? undefined;
   const stopUtc = request.nextUrl.searchParams.get('stopUtc') ?? undefined;
-  const cacheKey = `${startUtc ?? 'default'}:${stopUtc ?? 'default'}`;
+  const experimentId = request.nextUrl.searchParams.get('experimentId') ?? 'none';
+  const configHash = request.nextUrl.searchParams.get('configHash') ?? 'none';
+  const targetSource = request.nextUrl.searchParams.get('targetSource') ?? 'GOES';
+  const targetVariable = request.nextUrl.searchParams.get('targetVariable') ?? 'goes_mag_hn';
+  const targetLabel = request.nextUrl.searchParams.get('targetLabel') ?? `${targetSource}.${targetVariable}`;
+  const horizonMinutes = Number(request.nextUrl.searchParams.get('horizonMinutes') ?? 0);
+  const target: FeatureTargetConfig = {
+    source: targetSource,
+    variable: targetVariable,
+    label: targetLabel,
+    predictionHorizonMinutes: Number.isFinite(horizonMinutes) ? horizonMinutes : 0,
+  };
+  const cacheKey = `${experimentId}:${configHash}:${startUtc ?? 'default'}:${stopUtc ?? 'default'}:${targetSource}:${targetVariable}:${horizonMinutes}`;
 
   if (cachedResponse && cachedResponse.cacheKey === cacheKey && Date.now() < cachedResponse.expiresAt) {
     return NextResponse.json(cachedResponse.snapshot, {
@@ -86,7 +101,7 @@ export async function GET(request: NextRequest) {
   const featureSnapshot = buildFeatureWorkbenchSnapshot(rows, couplingSnapshot, context, {
     startUtc,
     stopUtc,
-  });
+  }, target);
   const snapshot = buildBaselinesLabSnapshot(featureSnapshot);
 
   if (goesMag.errorMessage) {

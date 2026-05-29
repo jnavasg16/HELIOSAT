@@ -1,20 +1,19 @@
 "use client";
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Activity,
-  Archive,
   ArrowLeft,
   CalendarRange,
   Check,
+  ChevronDown,
   Clock3,
   Database,
   ExternalLink,
   Eye,
   EyeOff,
   FlaskConical,
-  Gauge,
   Globe2,
   Info,
   Layers3,
@@ -24,8 +23,6 @@ import {
   RefreshCw,
   RadioTower,
   Satellite,
-  Sigma,
-  Waves,
   X,
 } from 'lucide-react';
 import {
@@ -56,19 +53,22 @@ import { UnivariateEdaPanel } from './UnivariateEdaPanel';
 import type { EdaStratum, UnivariateEdaSnapshot } from '@/services/univariateEdaService';
 import { L1EarthCouplingPanel } from './L1EarthCouplingPanel';
 import type { L1EarthCouplingSnapshot } from '@/services/l1EarthCouplingService';
-import { FeatureWorkbenchPanel } from './FeatureWorkbenchPanel';
-import type { FeatureWorkbenchSnapshot } from '@/services/featureEngineeringService';
-import { BaselinesLabPanel } from './BaselinesLabPanel';
-import type { BaselinesLabSnapshot } from '@/services/modelBenchmarkService';
-import { SequenceModelsPanel } from './SequenceModelsPanel';
-import type { SequenceModelsSnapshot } from '@/services/sequenceModelService';
-import { StormBrowserPanel } from './StormBrowserPanel';
-import type { StormBrowserSnapshot } from '@/services/stormEventService';
-import { LiveForecastPanel } from './LiveForecastPanel';
-import type { LiveForecastSnapshot } from '@/services/liveForecastService';
+import { ModelsOverviewPanel } from './ModelsOverviewPanel';
+import { MruValidationPanel } from './MruValidationPanel';
+import type { MruValidationSnapshot } from '@/services/mruValidationService';
+import { MruLiveForecastPanel } from './MruLiveForecastPanel';
 import type { HistoricPlotsSnapshot } from '@/services/historicPlotService';
 import { InSituOrbitScene } from './InSituOrbitScene';
 import { HistoricOrbitScene } from './HistoricOrbitScene';
+import {
+  PLAYGROUND_SCREENS_BY_STAGE,
+  getPlaygroundCodeAriaLabel,
+  getPlaygroundStage,
+  getScreenForView,
+  type PlaygroundScreenConfig,
+  type PlaygroundTab,
+  type StageCoded,
+} from './playgroundTaxonomy';
 
 type ChartSourceRow = {
   time_tag: string;
@@ -90,7 +90,6 @@ type ChartDefinition = {
 };
 
 type PlotTimeZone = 'UTC' | 'CEST';
-type PlaygroundTab = 'insitu' | 'historic' | 'pipeline' | 'quality' | 'eda' | 'coupling' | 'features' | 'baselines' | 'sequence' | 'storms' | 'live';
 
 interface PlaygroundDashboardProps extends PlaygroundTelemetryData {
   adminEmail: string | null;
@@ -105,19 +104,6 @@ const PLOT_TIME_ZONE_CONFIG: Record<PlotTimeZone, { label: string; timeZone: str
   UTC: { label: 'UTC', timeZone: 'UTC' },
   CEST: { label: 'CEST', timeZone: 'Europe/Madrid' },
 };
-const PLAYGROUND_TABS: Array<{ id: PlaygroundTab; label: string; description: string }> = [
-  { id: 'insitu', label: 'In situ data', description: 'Current L1 and near-Earth feeds' },
-  { id: 'historic', label: 'Historic data', description: 'Event windows and validation sets' },
-  { id: 'pipeline', label: 'Pipeline Health', description: 'Ingestion status and pull logs' },
-  { id: 'quality', label: 'Data Quality', description: 'Coverage, gaps, outliers, cadence' },
-  { id: 'eda', label: 'Univariate EDA', description: 'Distribution, stationarity, ACF' },
-  { id: 'coupling', label: 'L1-Earth Coupling', description: 'CCF, lag, MI, coherence' },
-  { id: 'features', label: 'Feature Workbench', description: 'Causal model matrix' },
-  { id: 'baselines', label: 'Baselines Lab', description: 'Naive, linear, VAR, boosting' },
-  { id: 'sequence', label: 'Sequence Models', description: 'LSTM, TCN, transformers' },
-  { id: 'storms', label: 'Storm Browser', description: 'Event catalog and holdout' },
-  { id: 'live', label: 'Live Forecast', description: 'Operational prediction loop' },
-];
 const HISTORIC_PLOT_COUNT_BY_SOURCE_ID: Record<string, number> = {
   'cdaweb-ace-wind-imap': 16,
   'ncei-dscovr-archive': 1,
@@ -932,6 +918,125 @@ function LiveDualClock() {
   );
 }
 
+function getStageAccentStyle(item: StageCoded): CSSProperties {
+  const stage = getPlaygroundStage(item.stageId);
+
+  return {
+    color: `var(${stage.colorVar})`,
+    borderColor: `color-mix(in srgb, var(${stage.colorVar}) 48%, transparent)`,
+    backgroundColor: `color-mix(in srgb, var(${stage.colorVar}) 12%, transparent)`,
+  };
+}
+
+function StageCodePill({
+  item,
+  compact = false,
+}: {
+  item: StageCoded;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      aria-label={getPlaygroundCodeAriaLabel(item)}
+      className={`inline-flex shrink-0 items-center rounded border font-mono font-semibold leading-none tracking-normal ${
+        compact ? 'px-1.5 py-1 text-[9px]' : 'px-2 py-1 text-[10px]'
+      }`}
+      style={getStageAccentStyle(item)}
+    >
+      {item.code}
+    </span>
+  );
+}
+
+function ScreenViewTabs({
+  screen,
+  activeView,
+  onSelectView,
+}: {
+  screen: PlaygroundScreenConfig;
+  activeView: PlaygroundTab;
+  onSelectView: (viewId: PlaygroundTab) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={`${screen.label} views`}
+      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-700/70 bg-slate-950/60 p-1 shadow-inner shadow-black/30"
+    >
+      {screen.views.map(view => {
+        const Icon = view.icon;
+        const isActive = view.id === activeView;
+
+        return (
+          <button
+            key={view.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            title={view.description}
+            onClick={() => onSelectView(view.id)}
+            className={`flex h-8 items-center gap-2 rounded-md px-3 font-mono text-[11px] uppercase tracking-widest transition ${
+              isActive
+                ? 'bg-cyan-400/15 text-cyan-100 shadow-inner shadow-cyan-950/30'
+                : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-100'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{view.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PlaygroundPageHeader({
+  screen,
+  activeView,
+  onSelectView,
+}: {
+  screen: PlaygroundScreenConfig;
+  activeView: PlaygroundTab;
+  onSelectView: (viewId: PlaygroundTab) => void;
+}) {
+  const stage = getPlaygroundStage(screen.stageId);
+  const hasMultipleViews = screen.views.length > 1;
+  const activeViewConfig = screen.views.find(view => view.id === activeView) ?? screen.views[0];
+
+  return (
+    <section className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-800/80 px-1 pb-3">
+      <div className="min-w-0">
+        <div className="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">
+          {stage.id} · {stage.label}
+        </div>
+        <h2 className="mt-1 flex min-w-0 items-baseline gap-2 text-xl font-semibold text-slate-100">
+          <span
+            aria-label={getPlaygroundCodeAriaLabel(screen)}
+            className="shrink-0 font-mono text-base tracking-normal"
+            style={{ color: `var(${stage.colorVar})` }}
+          >
+            {screen.code}
+          </span>
+          <span className="shrink-0 text-slate-600">·</span>
+          <span className="truncate">{screen.label}</span>
+        </h2>
+        {hasMultipleViews && (
+          <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
+            {activeViewConfig.description}
+          </div>
+        )}
+      </div>
+      {hasMultipleViews ? (
+        <ScreenViewTabs screen={screen} activeView={activeView} onSelectView={onSelectView} />
+      ) : (
+        <div className="truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
+          {screen.description}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TelemetryChart({
   definition,
   plotTimeZone,
@@ -1118,26 +1223,15 @@ export function PlaygroundDashboard({
   const [l1EarthCoupling, setL1EarthCoupling] = useState<L1EarthCouplingSnapshot | null>(null);
   const [isL1EarthCouplingRefreshing, setIsL1EarthCouplingRefreshing] = useState(false);
   const [l1EarthCouplingError, setL1EarthCouplingError] = useState<string | null>(null);
-  const [featureWorkbench, setFeatureWorkbench] = useState<FeatureWorkbenchSnapshot | null>(null);
-  const [isFeatureWorkbenchRefreshing, setIsFeatureWorkbenchRefreshing] = useState(false);
-  const [featureWorkbenchError, setFeatureWorkbenchError] = useState<string | null>(null);
-  const [baselinesLab, setBaselinesLab] = useState<BaselinesLabSnapshot | null>(null);
-  const [isBaselinesLabRefreshing, setIsBaselinesLabRefreshing] = useState(false);
-  const [baselinesLabError, setBaselinesLabError] = useState<string | null>(null);
-  const [sequenceModels, setSequenceModels] = useState<SequenceModelsSnapshot | null>(null);
-  const [isSequenceModelsRefreshing, setIsSequenceModelsRefreshing] = useState(false);
-  const [sequenceModelsError, setSequenceModelsError] = useState<string | null>(null);
-  const [stormBrowser, setStormBrowser] = useState<StormBrowserSnapshot | null>(null);
-  const [isStormBrowserRefreshing, setIsStormBrowserRefreshing] = useState(false);
-  const [stormBrowserError, setStormBrowserError] = useState<string | null>(null);
-  const [liveForecast, setLiveForecast] = useState<LiveForecastSnapshot | null>(null);
-  const [isLiveForecastRefreshing, setIsLiveForecastRefreshing] = useState(false);
-  const [liveForecastError, setLiveForecastError] = useState<string | null>(null);
+  const [mruValidation, setMruValidation] = useState<MruValidationSnapshot | null>(null);
+  const [isMruValidationRefreshing, setIsMruValidationRefreshing] = useState(false);
+  const [mruValidationError, setMruValidationError] = useState<string | null>(null);
   const [historicPlots, setHistoricPlots] = useState<HistoricPlotsSnapshot | null>(null);
   const [isHistoricPlotsRefreshing, setIsHistoricPlotsRefreshing] = useState(false);
   const [historicPlotsError, setHistoricPlotsError] = useState<string | null>(null);
   const [plotTimeZone, setPlotTimeZone] = useState<PlotTimeZone>('UTC');
   const [activeTab, setActiveTab] = useState<PlaygroundTab>('insitu');
+  const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
   const [isMissionInfoOpen, setIsMissionInfoOpen] = useState(false);
   const [isHistoricSidebarCollapsed, setIsHistoricSidebarCollapsed] = useState(false);
   const [selectedSpacecraftIds, setSelectedSpacecraftIds] = useState<SpacecraftId[]>(['DSCOVR']);
@@ -1153,20 +1247,15 @@ export function PlaygroundDashboard({
   const [selectedEdaVariable, setSelectedEdaVariable] = useState('all');
   const [selectedEdaStratum, setSelectedEdaStratum] = useState<EdaStratum>('all');
   const [selectedCouplingPairId, setSelectedCouplingPairId] = useState<string | null>(null);
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
-  const [selectedBaselineRunId, setSelectedBaselineRunId] = useState<string | null>(null);
   const isRequestInFlightRef = useRef(false);
   const isPipelineHealthRequestInFlightRef = useRef(false);
   const isDataQualityRequestInFlightRef = useRef(false);
+  const isMruValidationRequestInFlightRef = useRef(false);
   const isUnivariateEdaRequestInFlightRef = useRef(false);
   const isL1EarthCouplingRequestInFlightRef = useRef(false);
-  const isFeatureWorkbenchRequestInFlightRef = useRef(false);
-  const isBaselinesLabRequestInFlightRef = useRef(false);
-  const isSequenceModelsRequestInFlightRef = useRef(false);
-  const isStormBrowserRequestInFlightRef = useRef(false);
-  const isLiveForecastRequestInFlightRef = useRef(false);
   const isHistoricPlotsRequestInFlightRef = useRef(false);
   const isMountedRef = useRef(false);
+  const tabMenuRef = useRef<HTMLDivElement | null>(null);
 
   const refreshTelemetry = useCallback(async (options: { showActivity?: boolean } = {}) => {
     if (isRequestInFlightRef.current) {
@@ -1381,6 +1470,60 @@ export function PlaygroundDashboard({
     }
   }, [historicRange.start, historicRange.stop]);
 
+  const refreshMruValidation = useCallback(async (options: { showActivity?: boolean } = {}) => {
+    if (isMruValidationRequestInFlightRef.current) {
+      return;
+    }
+
+    const startUtc = datetimeLocalToUtcIso(historicRange.start);
+    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
+
+    if (!startUtc || !stopUtc) {
+      setMruValidationError('Invalid validation range');
+      return;
+    }
+
+    const showActivity = options.showActivity ?? true;
+    isMruValidationRequestInFlightRef.current = true;
+    if (showActivity) {
+      setIsMruValidationRefreshing(true);
+    }
+    setMruValidationError(null);
+
+    try {
+      const params = new URLSearchParams({ startUtc, stopUtc });
+      const response = await fetch(`/api/playground/mru-validation?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Validation request failed with ${response.status}`);
+      }
+
+      const nextSnapshot = await response.json() as MruValidationSnapshot;
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setMruValidation(nextSnapshot);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setMruValidationError(error instanceof Error ? error.message : 'Validation request failed');
+    } finally {
+      isMruValidationRequestInFlightRef.current = false;
+
+      if (showActivity && isMountedRef.current) {
+        setIsMruValidationRefreshing(false);
+      }
+    }
+  }, [historicRange.start, historicRange.stop]);
+
   const refreshUnivariateEda = useCallback(async (options: { showActivity?: boolean } = {}) => {
     if (isUnivariateEdaRequestInFlightRef.current) {
       return;
@@ -1507,264 +1650,6 @@ export function PlaygroundDashboard({
     }
   }, [historicRange.start, historicRange.stop]);
 
-  const refreshFeatureWorkbench = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isFeatureWorkbenchRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setFeatureWorkbenchError('Invalid feature workbench range');
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isFeatureWorkbenchRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsFeatureWorkbenchRefreshing(true);
-    }
-    setFeatureWorkbenchError(null);
-
-    try {
-      const params = new URLSearchParams({
-        startUtc,
-        stopUtc,
-        targetSource: 'GOES',
-        targetVariable: 'goes_mag_hn',
-        targetLabel: 'GOES-R MAG Hn',
-      });
-      const response = await fetch(`/api/playground/feature-workbench?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Feature workbench request failed with ${response.status}`);
-      }
-
-      const nextFeatureWorkbench = await response.json() as FeatureWorkbenchSnapshot;
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setFeatureWorkbench(nextFeatureWorkbench);
-      setSelectedFeatureId(currentFeatureId => (
-        currentFeatureId && nextFeatureWorkbench.featureDefinitions.some(feature => feature.id === currentFeatureId)
-          ? currentFeatureId
-          : nextFeatureWorkbench.featureDefinitions[0]?.id ?? null
-      ));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setFeatureWorkbenchError(error instanceof Error ? error.message : 'Feature workbench request failed');
-    } finally {
-      isFeatureWorkbenchRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsFeatureWorkbenchRefreshing(false);
-      }
-    }
-  }, [historicRange.start, historicRange.stop]);
-
-  const refreshBaselinesLab = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isBaselinesLabRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setBaselinesLabError('Invalid baselines range');
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isBaselinesLabRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsBaselinesLabRefreshing(true);
-    }
-    setBaselinesLabError(null);
-
-    try {
-      const params = new URLSearchParams({ startUtc, stopUtc });
-      const response = await fetch(`/api/playground/baselines-lab?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Baselines lab request failed with ${response.status}`);
-      }
-
-      const nextBaselinesLab = await response.json() as BaselinesLabSnapshot;
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setBaselinesLab(nextBaselinesLab);
-      setSelectedBaselineRunId(currentRunId => (
-        currentRunId && nextBaselinesLab.runs.some(run => run.runId === currentRunId)
-          ? currentRunId
-          : nextBaselinesLab.runs[0]?.runId ?? null
-      ));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setBaselinesLabError(error instanceof Error ? error.message : 'Baselines lab request failed');
-    } finally {
-      isBaselinesLabRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsBaselinesLabRefreshing(false);
-      }
-    }
-  }, [historicRange.start, historicRange.stop]);
-
-  const refreshSequenceModels = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isSequenceModelsRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setSequenceModelsError('Invalid sequence models range');
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isSequenceModelsRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsSequenceModelsRefreshing(true);
-    }
-    setSequenceModelsError(null);
-
-    try {
-      const params = new URLSearchParams({ startUtc, stopUtc });
-      const response = await fetch(`/api/playground/sequence-models?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Sequence models request failed with ${response.status}`);
-      }
-
-      const nextSequenceModels = await response.json() as SequenceModelsSnapshot;
-
-      if (isMountedRef.current) {
-        setSequenceModels(nextSequenceModels);
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        setSequenceModelsError(error instanceof Error ? error.message : 'Sequence models request failed');
-      }
-    } finally {
-      isSequenceModelsRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsSequenceModelsRefreshing(false);
-      }
-    }
-  }, [historicRange.start, historicRange.stop]);
-
-  const refreshStormBrowser = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isStormBrowserRequestInFlightRef.current) {
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isStormBrowserRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsStormBrowserRefreshing(true);
-    }
-    setStormBrowserError(null);
-
-    try {
-      const response = await fetch('/api/playground/storm-browser', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Storm browser request failed with ${response.status}`);
-      }
-
-      const nextStormBrowser = await response.json() as StormBrowserSnapshot;
-
-      if (isMountedRef.current) {
-        setStormBrowser(nextStormBrowser);
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        setStormBrowserError(error instanceof Error ? error.message : 'Storm browser request failed');
-      }
-    } finally {
-      isStormBrowserRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsStormBrowserRefreshing(false);
-      }
-    }
-  }, []);
-
-  const refreshLiveForecast = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isLiveForecastRequestInFlightRef.current) {
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isLiveForecastRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsLiveForecastRefreshing(true);
-    }
-    setLiveForecastError(null);
-
-    try {
-      const response = await fetch('/api/playground/live-forecast', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Live forecast request failed with ${response.status}`);
-      }
-
-      const nextLiveForecast = await response.json() as LiveForecastSnapshot;
-
-      if (isMountedRef.current) {
-        setLiveForecast(nextLiveForecast);
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        setLiveForecastError(error instanceof Error ? error.message : 'Live forecast request failed');
-      }
-    } finally {
-      isLiveForecastRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsLiveForecastRefreshing(false);
-      }
-    }
-  }, []);
-
   useEffect(() => {
     isMountedRef.current = true;
     const refreshInterval = window.setInterval(() => {
@@ -1776,6 +1661,31 @@ export function PlaygroundDashboard({
       window.clearInterval(refreshInterval);
     };
   }, [refreshTelemetry]);
+
+  useEffect(() => {
+    if (!isTabMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!tabMenuRef.current?.contains(event.target as Node)) {
+        setIsTabMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsTabMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isTabMenuOpen]);
 
   const hasPipelineHealth = pipelineHealth !== null;
 
@@ -1871,18 +1781,18 @@ export function PlaygroundDashboard({
     };
   }, [activeTab, hasL1EarthCoupling, refreshL1EarthCoupling]);
 
-  const hasFeatureWorkbench = featureWorkbench !== null;
+  const hasMruValidation = mruValidation !== null;
 
   useEffect(() => {
-    if (activeTab !== 'features') {
+    if (activeTab !== 'validation') {
       return;
     }
 
     let initialRefreshTimeout: number | null = null;
 
-    if (!hasFeatureWorkbench) {
+    if (!hasMruValidation) {
       initialRefreshTimeout = window.setTimeout(() => {
-        void refreshFeatureWorkbench({ showActivity: true });
+        void refreshMruValidation({ showActivity: true });
       }, 0);
     }
 
@@ -1891,100 +1801,7 @@ export function PlaygroundDashboard({
         window.clearTimeout(initialRefreshTimeout);
       }
     };
-  }, [activeTab, hasFeatureWorkbench, refreshFeatureWorkbench]);
-
-  const hasBaselinesLab = baselinesLab !== null;
-
-  useEffect(() => {
-    if (activeTab !== 'baselines') {
-      return;
-    }
-
-    let initialRefreshTimeout: number | null = null;
-
-    if (!hasBaselinesLab) {
-      initialRefreshTimeout = window.setTimeout(() => {
-        void refreshBaselinesLab({ showActivity: true });
-      }, 0);
-    }
-
-    return () => {
-      if (initialRefreshTimeout !== null) {
-        window.clearTimeout(initialRefreshTimeout);
-      }
-    };
-  }, [activeTab, hasBaselinesLab, refreshBaselinesLab]);
-
-  const hasSequenceModels = sequenceModels !== null;
-
-  useEffect(() => {
-    if (activeTab !== 'sequence') {
-      return;
-    }
-
-    let initialRefreshTimeout: number | null = null;
-
-    if (!hasSequenceModels) {
-      initialRefreshTimeout = window.setTimeout(() => {
-        void refreshSequenceModels({ showActivity: true });
-      }, 0);
-    }
-
-    return () => {
-      if (initialRefreshTimeout !== null) {
-        window.clearTimeout(initialRefreshTimeout);
-      }
-    };
-  }, [activeTab, hasSequenceModels, refreshSequenceModels]);
-
-  const hasStormBrowser = stormBrowser !== null;
-
-  useEffect(() => {
-    if (activeTab !== 'storms') {
-      return;
-    }
-
-    let initialRefreshTimeout: number | null = null;
-
-    if (!hasStormBrowser) {
-      initialRefreshTimeout = window.setTimeout(() => {
-        void refreshStormBrowser({ showActivity: true });
-      }, 0);
-    }
-
-    return () => {
-      if (initialRefreshTimeout !== null) {
-        window.clearTimeout(initialRefreshTimeout);
-      }
-    };
-  }, [activeTab, hasStormBrowser, refreshStormBrowser]);
-
-  const hasLiveForecast = liveForecast !== null;
-
-  useEffect(() => {
-    if (activeTab !== 'live') {
-      return;
-    }
-
-    let initialRefreshTimeout: number | null = null;
-
-    if (!hasLiveForecast) {
-      initialRefreshTimeout = window.setTimeout(() => {
-        void refreshLiveForecast({ showActivity: true });
-      }, 0);
-    }
-
-    const refreshInterval = window.setInterval(() => {
-      void refreshLiveForecast({ showActivity: false });
-    }, PIPELINE_HEALTH_POLL_INTERVAL_MS);
-
-    return () => {
-      if (initialRefreshTimeout !== null) {
-        window.clearTimeout(initialRefreshTimeout);
-      }
-      window.clearInterval(refreshInterval);
-    };
-  }, [activeTab, hasLiveForecast, refreshLiveForecast]);
+  }, [activeTab, hasMruValidation, refreshMruValidation]);
 
   useEffect(() => {
     if (activeTab !== 'historic') {
@@ -2187,6 +2004,10 @@ export function PlaygroundDashboard({
     })),
     [historicPlots],
   );
+  const activeScreen = getScreenForView(activeTab);
+  const ActiveScreenIcon = activeScreen.icon;
+  const activeScreenView = activeScreen.views.find(view => view.id === activeTab) ?? activeScreen.views[0];
+  const activeScreenHasMultipleViews = activeScreen.views.length > 1;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -2208,52 +2029,106 @@ export function PlaygroundDashboard({
           </div>
         </div>
 
-        <nav className="order-3 flex w-full min-w-0 overflow-x-auto overflow-y-hidden rounded-md border border-slate-700/70 bg-slate-950/60 p-1 [scrollbar-width:thin] md:order-none md:flex-1">
-          {PLAYGROUND_TABS.map(tab => {
-            const isSelected = activeTab === tab.id;
-            const Icon = tab.id === 'insitu'
-              ? Database
-              : tab.id === 'historic'
-                ? Archive
-                : tab.id === 'pipeline'
-                  ? Activity
-                  : tab.id === 'quality'
-                    ? Gauge
-                    : tab.id === 'eda'
-                      ? Sigma
-                      : tab.id === 'coupling'
-                        ? Waves
-                        : tab.id === 'features'
-                          ? Layers3
-                          : tab.id === 'storms'
-                            ? Globe2
-                            : tab.id === 'live'
-                              ? RadioTower
-                              : Activity;
-
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex min-w-[220px] shrink-0 items-center gap-2 rounded px-3 py-2 text-left transition ${
-                  isSelected
-                    ? 'bg-cyan-400/15 text-cyan-100'
-                    : 'text-slate-500 hover:bg-slate-800/70 hover:text-slate-200'
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm">{tab.label}</span>
-                  <span className="block truncate font-mono text-[9px] uppercase tracking-widest opacity-70">
-                    {tab.description}
-                  </span>
+        <div ref={tabMenuRef} className="relative order-3 w-full min-w-0 md:order-none md:max-w-xl md:flex-1">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={isTabMenuOpen}
+            onClick={() => setIsTabMenuOpen(open => !open)}
+            className="flex h-14 w-full items-center justify-between gap-3 rounded-md border border-slate-700/70 bg-slate-950/60 px-3 text-left transition hover:border-cyan-400/40 hover:bg-slate-900/70"
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-cyan-400/25 bg-cyan-400/10 text-cyan-200">
+                <ActiveScreenIcon className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-100">
+                  <StageCodePill item={activeScreen} compact />
+                  <span className="truncate">{activeScreen.label}</span>
+                  {activeScreenHasMultipleViews && (
+                    <span className="shrink-0 rounded border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-widest text-cyan-200/90">
+                      {activeScreenView.label}
+                    </span>
+                  )}
                 </span>
-              </button>
-            );
-          })}
-        </nav>
+                <span className="block truncate font-mono text-[9px] uppercase tracking-widest text-slate-500">
+                  {activeScreenHasMultipleViews
+                    ? activeScreen.views.map(view => view.label).join(' · ')
+                    : activeScreen.description}
+                </span>
+              </span>
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-slate-400 transition ${isTabMenuOpen ? 'rotate-180 text-cyan-200' : ''}`}
+              aria-hidden="true"
+            />
+          </button>
+
+          {isTabMenuOpen && (
+            <div
+              role="menu"
+              className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-[min(72vh,36rem)] overflow-y-auto rounded-md border border-slate-700/80 bg-slate-950/95 p-1 shadow-2xl shadow-black/50 backdrop-blur-xl"
+            >
+              {PLAYGROUND_SCREENS_BY_STAGE.map(({ stage, screens }) => (
+                <div key={stage.id}>
+                  <div
+                    role="separator"
+                    aria-label={stage.separatorLabel}
+                    className="flex items-center gap-2 px-2 py-2 first:pt-1"
+                  >
+                    <span className="h-px flex-1 bg-slate-800" aria-hidden="true" />
+                    <span className="font-mono text-[9px] uppercase tracking-[0.24em] text-slate-500">
+                      {stage.separatorLabel}
+                    </span>
+                    <span className="h-px flex-1 bg-slate-800" aria-hidden="true" />
+                  </div>
+
+                  {screens.map(screen => {
+                    const isSelected = activeScreen.id === screen.id;
+                    const Icon = screen.icon;
+                    const hasMultipleViews = screen.views.length > 1;
+
+                    return (
+                      <button
+                        key={screen.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={isSelected}
+                        onClick={() => {
+                          if (!isSelected) {
+                            setActiveTab(screen.views[0].id);
+                          }
+                          setIsTabMenuOpen(false);
+                        }}
+                        className={`flex min-h-14 w-full items-center justify-between gap-3 rounded px-3 py-2 text-left transition ${
+                          isSelected
+                            ? 'bg-cyan-400/15 text-cyan-100'
+                            : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-100'
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          <span className="min-w-0">
+                            <span className="flex min-w-0 items-center gap-2 text-sm">
+                              <StageCodePill item={screen} />
+                              <span className="truncate">{screen.label}</span>
+                            </span>
+                            <span className="block truncate font-mono text-[9px] uppercase tracking-widest opacity-70">
+                              {hasMultipleViews
+                                ? screen.views.map(view => view.label).join(' · ')
+                                : screen.description}
+                            </span>
+                          </span>
+                        </span>
+                        {isSelected && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-3">
           <LiveDualClock />
@@ -2275,6 +2150,12 @@ export function PlaygroundDashboard({
           </button>
         </div>
       </header>
+
+      <PlaygroundPageHeader
+        screen={activeScreen}
+        activeView={activeTab}
+        onSelectView={setActiveTab}
+      />
 
       {activeTab === 'insitu' ? (
         <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pr-1 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -2591,9 +2472,7 @@ export function PlaygroundDashboard({
                             setDataQuality(null);
                             setUnivariateEda(null);
                             setL1EarthCoupling(null);
-                            setFeatureWorkbench(null);
-                            setBaselinesLab(null);
-                            setSequenceModels(null);
+                            setMruValidation(null);
                           }}
                           className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
                         />
@@ -2609,9 +2488,7 @@ export function PlaygroundDashboard({
                             setDataQuality(null);
                             setUnivariateEda(null);
                             setL1EarthCoupling(null);
-                            setFeatureWorkbench(null);
-                            setBaselinesLab(null);
-                            setSequenceModels(null);
+                            setMruValidation(null);
                           }}
                           className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
                         />
@@ -2780,9 +2657,7 @@ export function PlaygroundDashboard({
             setDataQuality(null);
             setUnivariateEda(null);
             setL1EarthCoupling(null);
-            setFeatureWorkbench(null);
-            setBaselinesLab(null);
-            setSequenceModels(null);
+            setMruValidation(null);
           }}
           onRefresh={() => {
             void refreshDataQuality({ showActivity: true });
@@ -2812,53 +2687,33 @@ export function PlaygroundDashboard({
             void refreshL1EarthCoupling({ showActivity: true });
           }}
         />
-      ) : activeTab === 'features' ? (
-        <FeatureWorkbenchPanel
-          snapshot={featureWorkbench}
-          isLoading={isFeatureWorkbenchRefreshing}
-          error={featureWorkbenchError}
-          selectedFeatureId={selectedFeatureId}
-          onSelectedFeatureChange={setSelectedFeatureId}
-          onRefresh={() => {
-            void refreshFeatureWorkbench({ showActivity: true });
-          }}
+      ) : activeTab === 'overview' ? (
+        <ModelsOverviewPanel
+          onGoToValidation={() => setActiveTab('validation')}
+          onGoToLive={() => setActiveTab('forecast')}
         />
-      ) : activeTab === 'baselines' ? (
-        <BaselinesLabPanel
-          snapshot={baselinesLab}
-          isLoading={isBaselinesLabRefreshing}
-          error={baselinesLabError}
-          selectedRunId={selectedBaselineRunId}
-          onSelectedRunChange={setSelectedBaselineRunId}
-          onRefresh={() => {
-            void refreshBaselinesLab({ showActivity: true });
+      ) : activeTab === 'validation' ? (
+        <MruValidationPanel
+          snapshot={mruValidation}
+          isLoading={isMruValidationRefreshing}
+          error={mruValidationError}
+          range={historicRange}
+          onRangeChange={(nextRange) => {
+            setHistoricRange(nextRange);
+            setMruValidation(null);
           }}
-        />
-      ) : activeTab === 'sequence' ? (
-        <SequenceModelsPanel
-          snapshot={sequenceModels}
-          isLoading={isSequenceModelsRefreshing}
-          error={sequenceModelsError}
           onRefresh={() => {
-            void refreshSequenceModels({ showActivity: true });
-          }}
-        />
-      ) : activeTab === 'storms' ? (
-        <StormBrowserPanel
-          snapshot={stormBrowser}
-          isLoading={isStormBrowserRefreshing}
-          error={stormBrowserError}
-          onRefresh={() => {
-            void refreshStormBrowser({ showActivity: true });
+            void refreshMruValidation({ showActivity: true });
           }}
         />
       ) : (
-        <LiveForecastPanel
-          snapshot={liveForecast}
-          isLoading={isLiveForecastRefreshing}
-          error={liveForecastError}
+        <MruLiveForecastPanel
+          plasmaData={telemetryData.noaaPlasmaData}
+          magData={telemetryData.noaaMagData}
+          ephemerisData={telemetryData.noaaEphemerisData}
+          isRefreshing={isRefreshing}
           onRefresh={() => {
-            void refreshLiveForecast({ showActivity: true });
+            void refreshTelemetry({ showActivity: true });
           }}
         />
       )}
