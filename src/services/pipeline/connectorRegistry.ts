@@ -43,6 +43,7 @@ const WIRED_SOURCE_IDS = new Set([
   'swpc-rtsw-l1',
   'cdaweb-ace-wind-imap',
   'swpc-goes-json',
+  'ncei-goes-r-mag-seiss',
 ]);
 
 export const SPACE_WEATHER_CONNECTOR_REGISTRY: SourceConnectorRegistration[] =

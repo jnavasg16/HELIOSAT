@@ -115,3 +115,133 @@ variables:
       OMNI_HRO: ["Dst", "DST"]
       WDC_KYOTO: ["Dst"]
     notes: "Disturbance storm time index."
+
+  - canonical_name: goes_mag_hn
+    label: "GOES MAG Hn"
+    unit: "nT"
+    aliases:
+      GOES_NCEI: ["b_epn.N", "b_epnu.N"]
+      GOES_SWPC_JSON: ["Hn"]
+    notes: "GOES-R local geomagnetic N component from NCEI MAG b_epn coordinate N."
+
+  - canonical_name: goes_mag_hp
+    label: "GOES MAG Hp"
+    unit: "nT"
+    aliases:
+      GOES_NCEI: ["b_epn.P", "b_epnu.P"]
+      GOES_SWPC_JSON: ["Hp"]
+    notes: "GOES-R local geomagnetic P component from NCEI MAG b_epn coordinate P."
+
+  - canonical_name: goes_mag_he
+    label: "GOES MAG He"
+    unit: "nT"
+    aliases:
+      GOES_NCEI: ["b_epn.E", "b_epnu.E"]
+      GOES_SWPC_JSON: ["He"]
+    notes: "GOES-R local geomagnetic E component from NCEI MAG b_epn coordinate E."
+
+  - canonical_name: goes_mag_h_magnitude
+    label: "GOES MAG |H|"
+    unit: "nT"
+    aliases:
+      GOES_NCEI: ["sqrt(b_epn.E^2+b_epn.P^2+b_epn.N^2)", "b_total"]
+      GOES_SWPC_JSON: ["total"]
+    notes: "Primary target variable; stored as sqrt(HN^2+HP^2+HE^2) during NCEI post-processing."
+
+  - canonical_name: goes_electrons_2mev
+    label: "GOES electrons >=2 MeV"
+    unit: "pfu"
+    aliases:
+      GOES_NCEI: ["AvgIntElectronFlux"]
+      GOES_SWPC_JSON: [">=2 MeV"]
+    notes: "SEISS MPSH integral electron flux channel nearest >=2 MeV."
+
+  - canonical_name: goes_electrons_800kev
+    label: "GOES electrons >=800 keV"
+    unit: "pfu"
+    aliases:
+      GOES_NCEI: ["AvgDiffElectronFlux@800keV"]
+    notes: "SEISS MPSH electron flux channel nearest 800 keV."
+
+  - canonical_name: goes_protons_10mev
+    label: "GOES protons >=10 MeV"
+    unit: "pfu"
+    aliases:
+      GOES_NCEI: ["AvgIntProtonFlux@10MeV"]
+      GOES_SWPC_JSON: [">=10 MeV"]
+    notes: "SEISS SGPS integral proton flux channel nearest >=10 MeV."
+
+  - canonical_name: goes_protons_50mev
+    label: "GOES protons >=50 MeV"
+    unit: "pfu"
+    aliases:
+      GOES_NCEI: ["AvgIntProtonFlux@50MeV"]
+      GOES_SWPC_JSON: [">=50 MeV"]
+    notes: "SEISS SGPS integral proton flux channel nearest >=50 MeV."
+
+  - canonical_name: goes_protons_100mev
+    label: "GOES protons >=100 MeV"
+    unit: "pfu"
+    aliases:
+      GOES_NCEI: ["AvgIntProtonFlux@100MeV"]
+      GOES_SWPC_JSON: [">=100 MeV"]
+    notes: "SEISS SGPS integral proton flux channel nearest >=100 MeV."
+
+sources:
+  goes_nccei:
+    source_id: "ncei-goes-r-mag-seiss"
+    provider: "NOAA NCEI"
+    protocol: "archive-files"
+    format: "NetCDF"
+    root_url: "https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes{N}/l2/data/{product}/{year}/{month}/"
+    partitioning: ["source", "spacecraft", "year", "month"]
+    spacecraft: ["GOES-16", "GOES-17", "GOES-18", "GOES-19"]
+    products:
+      mag:
+        native_product: "magn-l2-avg1m"
+        cadence_s: 60
+        variables:
+          goes_mag_he:
+            native: "b_epn[coordinate=E]"
+            unit: "nT"
+            transform: "identity"
+          goes_mag_hp:
+            native: "b_epn[coordinate=P]"
+            unit: "nT"
+            transform: "identity"
+          goes_mag_hn:
+            native: "b_epn[coordinate=N]"
+            unit: "nT"
+            transform: "identity"
+          goes_mag_h_magnitude:
+            native: "b_epn"
+            unit: "nT"
+            transform: "sqrt(HN^2+HP^2+HE^2)"
+      mpsh:
+        native_product: "mpsh-l2-avg1m"
+        cadence_s: 60
+        variables:
+          goes_electrons_2mev:
+            native: "AvgIntElectronFlux"
+            unit: "pfu"
+            transform: "identity"
+          goes_electrons_800kev:
+            native: "AvgDiffElectronFlux"
+            unit: "pfu"
+            transform: "select_nearest_energy(800keV)"
+      sgps:
+        native_product: "sgps-l2-avg1m"
+        cadence_s: 60
+        variables:
+          goes_protons_10mev:
+            native: "AvgIntProtonFlux"
+            unit: "pfu"
+            transform: "select_nearest_energy(10MeV)"
+          goes_protons_50mev:
+            native: "AvgIntProtonFlux"
+            unit: "pfu"
+            transform: "select_nearest_energy(50MeV)"
+          goes_protons_100mev:
+            native: "AvgIntProtonFlux"
+            unit: "pfu"
+            transform: "select_nearest_energy(100MeV)"

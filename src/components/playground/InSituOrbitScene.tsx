@@ -23,6 +23,9 @@ const EARTH_DAY_TEXTURE_URL = '/earth/earth-blue-marble.jpg';
 const EARTH_NIGHT_TEXTURE_URL = '/earth/earth-night.jpg';
 const EARTH_BUMP_TEXTURE_URL = '/earth/earth-topology.png';
 const EARTH_CLOUDS_TEXTURE_URL = '/earth/clouds.png';
+const EARTH_TEXTURE_ANISOTROPY = 12;
+const EARTH_SEGMENTS = 128;
+const EARTH_CLOUD_OPACITY = 0.22;
 
 const GOES_NOMINAL_LONGITUDE_DEG: Record<string, number> = {
   'GOES-18': -137.0,
@@ -86,6 +89,43 @@ type EarthTextureSet = {
   bump: THREE.Texture | null;
   clouds: THREE.Texture | null;
 };
+
+const EMPTY_EARTH_TEXTURES: EarthTextureSet = {
+  day: null,
+  night: null,
+  bump: null,
+  clouds: null,
+};
+
+let earthTextureCache: EarthTextureSet | null = null;
+let earthTexturePromise: Promise<EarthTextureSet> | null = null;
+
+const CLOUD_VERTEX_SHADER = `
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const CLOUD_FRAGMENT_SHADER = `
+  uniform sampler2D cloudMap;
+  uniform vec3 cloudColor;
+  uniform float opacity;
+  varying vec2 vUv;
+
+  void main() {
+    float cloudMask = 1.0 - texture2D(cloudMap, vUv).r;
+    float alpha = smoothstep(0.08, 0.82, cloudMask) * opacity;
+
+    if (alpha < 0.01) {
+      discard;
+    }
+
+    gl_FragColor = vec4(cloudColor, alpha);
+  }
+`;
 
 interface InSituOrbitSceneProps {
   spacecraftTelemetry: SpacecraftTelemetry[];
@@ -438,99 +478,81 @@ const StatusPill = ({ status }: { status: SpacecraftConnectionStatus }) => {
   );
 };
 
-function useEarthTextures() {
-  const [textures, setTextures] = useState<EarthTextureSet>({
-    day: null,
-    night: null,
-    bump: null,
-    clouds: null,
+function prepareEarthTexture(texture: THREE.Texture, colorSpace: THREE.ColorSpace = THREE.NoColorSpace) {
+  texture.colorSpace = colorSpace;
+  texture.anisotropy = EARTH_TEXTURE_ANISOTROPY;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+
+  return texture;
+}
+
+function loadEarthTexture(loader: THREE.TextureLoader, url: string, colorSpace: THREE.ColorSpace = THREE.NoColorSpace) {
+  return new Promise<THREE.Texture | null>((resolve) => {
+    loader.load(
+      url,
+      texture => resolve(prepareEarthTexture(texture, colorSpace)),
+      undefined,
+      () => resolve(null),
+    );
   });
+}
 
-  useEffect(() => {
+function getEarthTextureSet() {
+  if (earthTextureCache) {
+    return Promise.resolve(earthTextureCache);
+  }
+
+  if (!earthTexturePromise) {
     const loader = new THREE.TextureLoader();
-    const loadedTextures: THREE.Texture[] = [];
-    let isCancelled = false;
-
     loader.setCrossOrigin('anonymous');
 
-    const loadTexture = async (url: string, colorSpace?: THREE.ColorSpace) => {
-      const texture = await loader.loadAsync(url);
-      texture.colorSpace = colorSpace ?? THREE.NoColorSpace;
-      texture.anisotropy = 8;
-      texture.minFilter = THREE.LinearMipmapLinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.needsUpdate = true;
-      loadedTextures.push(texture);
+    earthTexturePromise = Promise.all([
+      loadEarthTexture(loader, EARTH_DAY_TEXTURE_URL, THREE.SRGBColorSpace),
+      loadEarthTexture(loader, EARTH_NIGHT_TEXTURE_URL, THREE.SRGBColorSpace),
+      loadEarthTexture(loader, EARTH_BUMP_TEXTURE_URL),
+      loadEarthTexture(loader, EARTH_CLOUDS_TEXTURE_URL),
+    ]).then(([day, night, bump, clouds]) => {
+      earthTextureCache = {
+        day,
+        night,
+        bump,
+        clouds,
+      };
 
-      return texture;
-    };
+      return earthTextureCache;
+    });
+  }
 
-    Promise.allSettled([
-      loadTexture(EARTH_DAY_TEXTURE_URL, THREE.SRGBColorSpace),
-      loadTexture(EARTH_NIGHT_TEXTURE_URL, THREE.SRGBColorSpace),
-      loadTexture(EARTH_BUMP_TEXTURE_URL),
-      loadTexture(EARTH_CLOUDS_TEXTURE_URL, THREE.SRGBColorSpace),
-    ]).then(results => {
-      if (isCancelled) {
-        loadedTextures.forEach(texture => texture.dispose());
-        return;
+  return earthTexturePromise;
+}
+
+function useEarthTextures() {
+  const [textures, setTextures] = useState<EarthTextureSet>(() => earthTextureCache ?? EMPTY_EARTH_TEXTURES);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    getEarthTextureSet().then(nextTextures => {
+      if (!isCancelled) {
+        setTextures(nextTextures);
       }
-
-      setTextures({
-        day: results[0].status === 'fulfilled' ? results[0].value : null,
-        night: results[1].status === 'fulfilled' ? results[1].value : null,
-        bump: results[2].status === 'fulfilled' ? results[2].value : null,
-        clouds: results[3].status === 'fulfilled' ? results[3].value : null,
-      });
     });
 
     return () => {
       isCancelled = true;
-      loadedTextures.forEach(texture => texture.dispose());
     };
   }, []);
 
   return textures;
 }
 
-export function EarthModel() {
-  const textures = useEarthTextures();
-
+function EarthReferenceLines() {
   return (
-    <group>
-      <group>
-        <mesh>
-          <sphereGeometry args={[EARTH_RADIUS, 96, 96]} />
-          <meshStandardMaterial
-            color={textures.day ? '#ffffff' : '#0b2545'}
-            map={textures.day}
-            bumpMap={textures.bump}
-            bumpScale={0.016}
-            emissive="#020617"
-            emissiveMap={textures.night}
-            emissiveIntensity={textures.night ? 0.22 : 0.08}
-            roughness={0.86}
-            metalness={0.04}
-          />
-        </mesh>
-      </group>
-
-      {textures.clouds && (
-        <mesh>
-          <sphereGeometry args={[EARTH_RADIUS + 0.024, 96, 96]} />
-          <meshStandardMaterial
-            color="#ffffff"
-            alphaMap={textures.clouds}
-            transparent
-            opacity={0.42}
-            alphaTest={0.18}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            roughness={1}
-          />
-        </mesh>
-      )}
-
+    <>
       <Line
         points={circlePoints(EARTH_RADIUS + 0.014, 'yz')}
         color="#fde68a"
@@ -555,6 +577,62 @@ export function EarthModel() {
           side={THREE.BackSide}
         />
       </mesh>
+    </>
+  );
+}
+
+function EarthCloudLayer({ texture }: { texture: THREE.Texture }) {
+  const uniforms = useMemo(
+    () => ({
+      cloudMap: { value: texture },
+      cloudColor: { value: new THREE.Color('#f8fbff') },
+      opacity: { value: EARTH_CLOUD_OPACITY },
+    }),
+    [texture],
+  );
+
+  return (
+    <mesh>
+      <sphereGeometry args={[EARTH_RADIUS + 0.024, EARTH_SEGMENTS, EARTH_SEGMENTS]} />
+      <shaderMaterial
+        uniforms={uniforms}
+        vertexShader={CLOUD_VERTEX_SHADER}
+        fragmentShader={CLOUD_FRAGMENT_SHADER}
+        transparent
+        depthWrite={false}
+        blending={THREE.NormalBlending}
+      />
+    </mesh>
+  );
+}
+
+export function EarthModel() {
+  const textures = useEarthTextures();
+
+  return (
+    <group>
+      <group>
+        <mesh>
+          <sphereGeometry args={[EARTH_RADIUS, EARTH_SEGMENTS, EARTH_SEGMENTS]} />
+          <meshStandardMaterial
+            color={textures.day ? '#dceafe' : '#0b2545'}
+            map={textures.day}
+            bumpMap={textures.bump}
+            bumpScale={textures.bump ? 0.012 : 0}
+            emissive="#020617"
+            emissiveMap={textures.night}
+            emissiveIntensity={textures.night ? 0.16 : 0.08}
+            roughness={0.92}
+            metalness={0}
+          />
+        </mesh>
+      </group>
+
+      {textures.clouds && (
+        <EarthCloudLayer texture={textures.clouds} />
+      )}
+
+      <EarthReferenceLines />
     </group>
   );
 }
@@ -562,8 +640,8 @@ export function EarthModel() {
 export function SunVector() {
   return (
     <group>
-      <pointLight position={[5.4, 1.4, 0.8]} intensity={7.5} color="#ffffff" distance={8} />
-      <directionalLight position={[5.4, 1.4, 0.8]} intensity={2.35} color="#f8fbff" />
+      <pointLight position={[5.4, 1.4, 0.8]} intensity={3.2} color="#ffffff" distance={8} />
+      <directionalLight position={[5.4, 1.4, 0.8]} intensity={1.25} color="#f8fbff" />
       <group position={[4.15, 1.08, 0.22]}>
         <mesh>
           <sphereGeometry args={[0.075, 24, 24]} />
