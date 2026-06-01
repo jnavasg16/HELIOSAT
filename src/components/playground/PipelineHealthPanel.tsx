@@ -21,11 +21,17 @@ import type {
   PipelineSourceStatus,
   PipelineSparkPoint,
 } from '@/services/pipelineHealthService';
+import type { TrainingExperimentRecord } from '@/services/trainingExperimentConfig';
+import {
+  getModelDataDependencies,
+  type ExperimentDataDependency,
+} from './experimentDataDependencies';
 
 interface PipelineHealthPanelProps {
   snapshot: PipelineHealthSnapshot | null;
   isLoading: boolean;
   error: string | null;
+  activeExperiment: TrainingExperimentRecord | null;
   onRefresh: () => void;
 }
 
@@ -75,6 +81,27 @@ const STATUS_META: Record<PipelineSourceStatus, {
     icon: AlertTriangle,
     sparkColor: '#fb7185',
   },
+  'not-wired': {
+    label: 'NOT WIRED',
+    className: 'border-slate-700 bg-slate-950 text-slate-400',
+    icon: CircleSlash,
+    sparkColor: '#64748b',
+  },
+};
+
+const SOURCE_STATUS_ORDER: Record<PipelineSourceStatus, number> = {
+  live: 0,
+  historic: 1,
+  stale: 2,
+  error: 3,
+  off: 4,
+  'not-wired': 5,
+};
+
+const DEPENDENCY_ROLE_LABEL: Record<ExperimentDataDependency['role'], string> = {
+  l1_source: 'L1',
+  target_source: 'TARGET',
+  mru_required: 'MRU',
 };
 
 function formatTimestamp(value: string | null) {
@@ -144,6 +171,72 @@ function formatNumber(value: number | null, maximumFractionDigits = 1) {
   }
 
   return value.toLocaleString('en-US', { maximumFractionDigits });
+}
+
+function getSourceHealthGrade(source: PipelineSourceHealth) {
+  if (source.status === 'not-wired') {
+    return {
+      label: 'Catalog only',
+      score: null,
+      className: 'border-slate-700 bg-slate-950 text-slate-400',
+    };
+  }
+
+  if (source.status === 'error' || source.status === 'off') {
+    return {
+      label: 'Blocked',
+      score: 0,
+      className: 'border-rose-400/30 bg-rose-400/10 text-rose-100',
+    };
+  }
+
+  const coverageValues = source.coverage
+    .map(metric => metric.percent)
+    .filter((value): value is number => value !== null);
+  const coverageScore = coverageValues.length > 0
+    ? coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length
+    : source.status === 'live'
+      ? 75
+      : 50;
+  const freshnessScore = source.status === 'live'
+    ? 100
+    : source.status === 'historic'
+      ? 85
+      : source.status === 'stale'
+        ? 45
+        : 20;
+  const errorPenalty = source.errorRate24hPercent === null ? 0 : Math.min(40, source.errorRate24hPercent);
+  const score = Math.max(0, Math.min(100, (coverageScore * 0.45) + (freshnessScore * 0.55) - errorPenalty));
+
+  if (score >= 80) {
+    return {
+      label: 'Ready',
+      score,
+      className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100',
+    };
+  }
+
+  if (score >= 60) {
+    return {
+      label: 'Usable',
+      score,
+      className: 'border-cyan-300/30 bg-cyan-300/10 text-cyan-100',
+    };
+  }
+
+  if (score >= 35) {
+    return {
+      label: 'Degraded',
+      score,
+      className: 'border-amber-300/30 bg-amber-300/10 text-amber-100',
+    };
+  }
+
+  return {
+    label: 'Blocked',
+    score,
+    className: 'border-rose-400/30 bg-rose-400/10 text-rose-100',
+  };
 }
 
 function StatusBadge({ status }: { status: PipelineSourceStatus }) {
@@ -231,18 +324,26 @@ function CoverageGrid({ source }: { source: PipelineSourceHealth }) {
 
 function PipelineSourceCard({
   source,
+  dependencies,
   onOpen,
 }: {
   source: PipelineSourceHealth;
+  dependencies: ExperimentDataDependency[];
   onOpen: (source: PipelineSourceHealth) => void;
 }) {
   const statusMeta = STATUS_META[source.status];
+  const grade = getSourceHealthGrade(source);
+  const isExperimentDependency = dependencies.length > 0;
 
   return (
     <button
       type="button"
       onClick={() => onOpen(source)}
-      className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/45 p-3 text-left transition hover:border-cyan-400/35 hover:bg-slate-900/55"
+      className={`min-w-0 rounded-lg border p-3 text-left transition hover:border-cyan-400/35 hover:bg-slate-900/55 ${
+        isExperimentDependency
+          ? 'border-cyan-400/45 bg-cyan-400/[0.07] shadow-[0_0_24px_rgba(34,211,238,0.08)]'
+          : 'border-slate-800 bg-slate-950/45'
+      }`}
     >
       <span className="flex min-w-0 items-start justify-between gap-3">
         <span className="min-w-0">
@@ -252,6 +353,20 @@ function PipelineSourceCard({
           </span>
         </span>
         <StatusBadge status={source.status} />
+      </span>
+
+      <span className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className={`rounded border px-2 py-1 font-mono text-[9px] uppercase tracking-widest ${grade.className}`}>
+          {grade.label}{grade.score === null ? '' : ` ${Math.round(grade.score)}%`}
+        </span>
+        {dependencies.map(dependency => (
+          <span
+            key={`${source.sourceId}-${dependency.role}`}
+            className="rounded border border-cyan-300/35 bg-cyan-300/10 px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-cyan-100"
+          >
+            {DEPENDENCY_ROLE_LABEL[dependency.role]}
+          </span>
+        ))}
       </span>
 
       <span className="mt-3 grid gap-1.5 rounded-md border border-slate-800 bg-slate-950/50 p-2">
@@ -355,7 +470,7 @@ function PipelineSourceDetailModal({
     <div className="fixed inset-0 z-[2147483647] bg-slate-950/85 p-4 backdrop-blur-md sm:p-8">
       <button
         type="button"
-        aria-label="Cerrar detalle de fuente"
+        aria-label="Close source detail"
         className="absolute inset-0 cursor-default"
         onClick={onClose}
       />
@@ -373,7 +488,7 @@ function PipelineSourceDetailModal({
           </div>
           <button
             type="button"
-            aria-label="Cerrar"
+            aria-label="Close"
             onClick={onClose}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-700 text-slate-300 transition hover:border-cyan-400/40 hover:text-cyan-100"
           >
@@ -466,20 +581,51 @@ export function PipelineHealthPanel({
   snapshot,
   isLoading,
   error,
+  activeExperiment,
   onRefresh,
 }: PipelineHealthPanelProps) {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const dependencies = useMemo(
+    () => getModelDataDependencies(activeExperiment),
+    [activeExperiment],
+  );
+  const dependenciesBySourceId = useMemo(() => {
+    const bySourceId = new Map<string, ExperimentDataDependency[]>();
+
+    dependencies.forEach(dependency => {
+      bySourceId.set(dependency.sourceId, [...(bySourceId.get(dependency.sourceId) ?? []), dependency]);
+    });
+
+    return bySourceId;
+  }, [dependencies]);
   const groupedSources = useMemo(
     () =>
       GROUPS.map(group => ({
         ...group,
-        sources: snapshot?.sources.filter(source => source.group === group.id) ?? [],
+        sources: (snapshot?.sources.filter(source => source.group === group.id) ?? [])
+          .sort((a, b) => {
+            const aIsDependency = dependenciesBySourceId.has(a.sourceId);
+            const bIsDependency = dependenciesBySourceId.has(b.sourceId);
+
+            if (aIsDependency !== bIsDependency) {
+              return aIsDependency ? -1 : 1;
+            }
+
+            return SOURCE_STATUS_ORDER[a.status] - SOURCE_STATUS_ORDER[b.status] || a.name.localeCompare(b.name);
+          }),
       })),
-    [snapshot],
+    [dependenciesBySourceId, snapshot],
   );
   const selectedSource = useMemo(
     () => snapshot?.sources.find(source => source.sourceId === selectedSourceId) ?? null,
     [selectedSourceId, snapshot],
+  );
+  const activeDependencySources = useMemo(
+    () => dependencies.map(dependency => ({
+      dependency,
+      source: snapshot?.sources.find(candidate => candidate.sourceId === dependency.sourceId) ?? null,
+    })),
+    [dependencies, snapshot],
   );
 
   return (
@@ -517,7 +663,50 @@ export function PipelineHealthPanel({
         </div>
 
         {snapshot ? (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <div className="grid gap-4">
+            {activeDependencySources.length > 0 && (
+              <section className="rounded-lg border border-cyan-400/25 bg-cyan-400/[0.04] p-3">
+                <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-cyan-300">
+                  Modeling data dependencies
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {activeDependencySources.map(({ dependency, source }) => {
+                    const grade = source ? getSourceHealthGrade(source) : null;
+
+                    return (
+                      <button
+                        key={`${dependency.sourceId}-${dependency.role}`}
+                        type="button"
+                        onClick={() => source && setSelectedSourceId(source.sourceId)}
+                        disabled={!source}
+                        className="min-w-0 rounded-md border border-slate-800 bg-slate-950/45 p-3 text-left transition enabled:hover:border-cyan-400/40"
+                      >
+                        <span className="block font-mono text-[9px] uppercase tracking-widest text-slate-500">
+                          {dependency.label}
+                        </span>
+                        <span className="mt-1 block truncate text-sm font-semibold text-slate-100">
+                          {source?.name ?? dependency.sourceId}
+                        </span>
+                        <span className="mt-2 flex flex-wrap gap-1.5">
+                          <span className={`rounded border px-2 py-1 font-mono text-[9px] uppercase tracking-widest ${
+                            grade?.className ?? 'border-slate-700 bg-slate-950 text-slate-500'
+                          }`}>
+                            {grade ? `${grade.label}${grade.score === null ? '' : ` ${Math.round(grade.score)}%`}` : 'Missing'}
+                          </span>
+                          {dependency.variables.map(variable => (
+                            <span key={variable} className="rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-[9px] text-slate-400">
+                              {variable}
+                            </span>
+                          ))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             {groupedSources.map(group => {
               const Icon = group.icon;
 
@@ -543,6 +732,7 @@ export function PipelineHealthPanel({
                       <PipelineSourceCard
                         key={source.sourceId}
                         source={source}
+                        dependencies={dependenciesBySourceId.get(source.sourceId) ?? []}
                         onOpen={(nextSource) => setSelectedSourceId(nextSource.sourceId)}
                       />
                     ))}
@@ -550,6 +740,7 @@ export function PipelineHealthPanel({
                 </section>
               );
             })}
+            </div>
           </div>
         ) : (
           <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-slate-800 bg-slate-950/50">

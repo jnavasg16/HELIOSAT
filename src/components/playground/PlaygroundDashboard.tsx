@@ -18,6 +18,7 @@ import {
   Info,
   Layers3,
   ListFilter,
+  MoreVertical,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -49,15 +50,15 @@ import { PipelineHealthPanel } from './PipelineHealthPanel';
 import type { PipelineHealthSnapshot } from '@/services/pipelineHealthService';
 import { DataQualityPanel } from './DataQualityPanel';
 import type { DataQualitySnapshot } from '@/services/dataQualityService';
-import { UnivariateEdaPanel } from './UnivariateEdaPanel';
-import type { EdaStratum, UnivariateEdaSnapshot } from '@/services/univariateEdaService';
-import { L1EarthCouplingPanel } from './L1EarthCouplingPanel';
-import type { L1EarthCouplingSnapshot } from '@/services/l1EarthCouplingService';
-import { ModelsOverviewPanel } from './ModelsOverviewPanel';
+import { ExplorationUnivariatePanel } from './ExplorationUnivariatePanel';
+import { ExplorationCouplingPanel } from './ExplorationCouplingPanel';
+import type { ExplorationSnapshot } from '@/services/explorationService';
+import { ModelsOverviewPanel, DataPipelinePanel } from './ModelsOverviewPanel';
 import { MruValidationPanel } from './MruValidationPanel';
 import type { MruValidationSnapshot } from '@/services/mruValidationService';
 import { MruLiveForecastPanel } from './MruLiveForecastPanel';
 import type { HistoricPlotsSnapshot } from '@/services/historicPlotService';
+import { HistoricAvailabilityCalendar } from './HistoricAvailabilityCalendar';
 import { InSituOrbitScene } from './InSituOrbitScene';
 import { HistoricOrbitScene } from './HistoricOrbitScene';
 import {
@@ -69,6 +70,7 @@ import {
   type PlaygroundTab,
   type StageCoded,
 } from './playgroundTaxonomy';
+import { PLAYGROUND_SCREEN_INFO } from './playgroundScreenInfo';
 
 type ChartSourceRow = {
   time_tag: string;
@@ -145,14 +147,27 @@ function parseMetric(value: string | number | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function getMadridTimeZoneLabel(date: Date) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Madrid',
-    timeZoneName: 'short',
-  }).formatToParts(date);
-
-  return parts.find(part => part.type === 'timeZoneName')?.value ?? 'CEST';
+function getZoneShortLabel(date: Date, timeZone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' }).formatToParts(date);
+    return parts.find(part => part.type === 'timeZoneName')?.value ?? timeZone;
+  } catch {
+    return timeZone;
+  }
 }
+
+/** Timezones offered in the second-clock picker. */
+const CUSTOM_ZONE_OPTIONS: Array<{ tz: string; city: string }> = [
+  { tz: 'Europe/Madrid', city: 'Madrid' },
+  { tz: 'Europe/London', city: 'London' },
+  { tz: 'Europe/Berlin', city: 'Berlin' },
+  { tz: 'America/New_York', city: 'New York' },
+  { tz: 'America/Los_Angeles', city: 'Los Angeles' },
+  { tz: 'America/Sao_Paulo', city: 'São Paulo' },
+  { tz: 'Asia/Tokyo', city: 'Tokyo' },
+  { tz: 'Asia/Kolkata', city: 'India' },
+  { tz: 'Australia/Sydney', city: 'Sydney' },
+];
 
 function formatClockDate(date: Date, timeZone: string) {
   return date.toLocaleDateString('en-US', {
@@ -689,11 +704,13 @@ function HistoricSidebarRail({
   sources,
   selectedSourceIds,
   onToggleSource,
+  onOpenAvailability,
   onExpand,
 }: {
   sources: PublicSpaceWeatherSource[];
   selectedSourceIds: string[];
   onToggleSource: (sourceId: string) => void;
+  onOpenAvailability: () => void;
   onExpand: () => void;
 }) {
   const selectedSources = sources.filter(source => selectedSourceIds.includes(source.id));
@@ -711,12 +728,15 @@ function HistoricSidebarRail({
           <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
         </button>
         <div className="mt-2 grid gap-2">
-          <div
-            className="flex h-10 items-center justify-center rounded-md border border-slate-800 bg-slate-950/50 text-cyan-300"
-            title="Historic window"
+          <button
+            type="button"
+            aria-label="Open historical availability calendar"
+            onClick={onOpenAvailability}
+            className="flex h-10 items-center justify-center rounded-md border border-slate-800 bg-slate-950/50 text-cyan-300 transition hover:border-cyan-400/50 hover:bg-cyan-400/10 hover:text-cyan-100"
+            title="Historical availability"
           >
             <CalendarRange className="h-4 w-4" aria-hidden="true" />
-          </div>
+          </button>
           <div
             className="grid min-h-12 place-items-center rounded-md border border-slate-800 bg-slate-950/50 text-amber-300"
             title={`${selectedSources.length} selected data sets`}
@@ -870,49 +890,89 @@ function MissionInfoModal({
   );
 }
 
-function LiveDualClock() {
+function LiveDualClock({
+  activeClock,
+  onSelectClock,
+  customZone,
+  onChangeCustomZone,
+}: {
+  activeClock: 'utc' | 'custom';
+  onSelectClock: (clock: 'utc' | 'custom') => void;
+  customZone: string;
+  onChangeCustomZone: (tz: string) => void;
+}) {
   const [now, setNow] = useState<Date | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setNow(new Date());
-    }, 1000);
-
+    const interval = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
-  const madridLabel = now ? getMadridTimeZoneLabel(now) : 'CEST';
+  const utcActive = activeClock === 'utc';
+  const customLabel = now ? getZoneShortLabel(now, customZone) : 'LOCAL';
+  const customCity = CUSTOM_ZONE_OPTIONS.find(o => o.tz === customZone)?.city ?? (customZone.split('/').pop() ?? customZone).replace('_', ' ');
   const utcTime = now ? formatClockTime(now, 'UTC') : '--:--:--';
   const utcDate = now ? formatClockDate(now, 'UTC') : '--- --';
-  const madridTime = now ? formatClockTime(now, 'Europe/Madrid') : '--:--:--';
-  const madridDate = now ? formatClockDate(now, 'Europe/Madrid') : '--- --';
+  const customTime = now ? formatClockTime(now, customZone) : '--:--:--';
+  const customDate = now ? formatClockDate(now, customZone) : '--- --';
+
+  const baseChip = 'min-w-[188px] rounded-md border px-3 py-2 text-left transition-colors';
+  const activeChip = 'border-cyan-400/40 bg-cyan-400/10 shadow-[0_0_22px_rgba(34,211,238,0.08)]';
+  const idleChip = 'border-slate-700/70 bg-slate-950/60 hover:border-slate-600/80';
 
   return (
     <div className="hidden min-w-0 items-stretch gap-2 lg:flex">
-      <div className="min-w-[188px] rounded-md border border-slate-700/70 bg-slate-950/60 px-3 py-2 shadow-inner shadow-cyan-950/20">
-        <div className="mb-1 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+      {/* UTC clock — click to drive plot times */}
+      <button type="button" onClick={() => onSelectClock('utc')} title="Show plot times in UTC" className={`${baseChip} ${utcActive ? activeChip : idleChip}`}>
+        <div className={`mb-1 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest ${utcActive ? 'text-cyan-400/70' : 'text-slate-500'}`}>
           <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
           <span>UTC</span>
+          {utcActive && <span className="ml-auto rounded bg-cyan-400/15 px-1 text-[8px] text-cyan-200">PLOTS</span>}
         </div>
-        <div className="font-mono text-xl font-semibold leading-none tracking-wider text-slate-100 tabular-nums">
-          {utcTime}
-        </div>
-        <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-slate-600">
-          {utcDate}
-        </div>
-      </div>
+        <div className={`font-mono text-xl font-semibold leading-none tracking-wider tabular-nums ${utcActive ? 'text-cyan-100' : 'text-slate-100'}`}>{utcTime}</div>
+        <div className={`mt-1 font-mono text-[10px] uppercase tracking-widest ${utcActive ? 'text-cyan-400/50' : 'text-slate-600'}`}>{utcDate}</div>
+      </button>
 
-      <div className="min-w-[188px] rounded-md border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 shadow-[0_0_22px_rgba(34,211,238,0.08)]">
-        <div className="mb-1 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-cyan-400/70">
-          <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{madridLabel}</span>
-        </div>
-        <div className="font-mono text-xl font-semibold leading-none tracking-wider text-cyan-100 tabular-nums">
-          {madridTime}
-        </div>
-        <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-cyan-400/50">
-          {madridDate} Madrid
-        </div>
+      {/* Custom clock — click to drive plot times; 3-dots to pick the timezone */}
+      <div className="relative">
+        <button type="button" onClick={() => onSelectClock('custom')} title={`Show plot times in ${customCity} (${customLabel})`} className={`${baseChip} w-full ${!utcActive ? activeChip : idleChip}`}>
+          <div className={`mb-1 flex items-center gap-1.5 pr-5 font-mono text-[10px] uppercase tracking-widest ${!utcActive ? 'text-cyan-400/70' : 'text-slate-500'}`}>
+            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="truncate">{customLabel}</span>
+            {!utcActive && <span className="ml-auto rounded bg-cyan-400/15 px-1 text-[8px] text-cyan-200">PLOTS</span>}
+          </div>
+          <div className={`font-mono text-xl font-semibold leading-none tracking-wider tabular-nums ${!utcActive ? 'text-cyan-100' : 'text-slate-100'}`}>{customTime}</div>
+          <div className={`mt-1 truncate font-mono text-[10px] uppercase tracking-widest ${!utcActive ? 'text-cyan-400/50' : 'text-slate-600'}`}>{customDate} {customCity}</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMenuOpen(open => !open)}
+          title="Choose timezone"
+          className="absolute right-1 top-1 rounded p-1 text-slate-500 hover:bg-slate-800/60 hover:text-slate-200"
+        >
+          <MoreVertical className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+        {menuOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+            <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border border-slate-700 bg-slate-950/95 p-1 shadow-2xl backdrop-blur">
+              <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-slate-600">Custom clock timezone</div>
+              {CUSTOM_ZONE_OPTIONS.map(opt => (
+                <button
+                  key={opt.tz}
+                  type="button"
+                  onClick={() => { onChangeCustomZone(opt.tz); onSelectClock('custom'); setMenuOpen(false); }}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-slate-300 hover:bg-slate-800/70"
+                >
+                  <span className="flex-1 truncate">{opt.city}</span>
+                  <span className="font-mono text-[10px] text-slate-500">{now ? getZoneShortLabel(now, opt.tz) : ''}</span>
+                  {opt.tz === customZone && <Check className="h-3 w-3 shrink-0 text-cyan-300" aria-hidden="true" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -990,14 +1050,99 @@ function ScreenViewTabs({
   );
 }
 
+function ScreenInfoModal({ screen, onClose }: { screen: PlaygroundScreenConfig; onClose: () => void }) {
+  const info = PLAYGROUND_SCREEN_INFO[screen.id];
+  const stage = getPlaygroundStage(screen.stageId);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  if (!info) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-slate-950/80 p-4 backdrop-blur-md">
+      <button type="button" aria-label="Cerrar" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <section className="relative w-full max-w-xl overflow-hidden rounded-lg border border-slate-700 bg-slate-950 shadow-2xl shadow-cyan-950/30">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-4">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-[0.26em]" style={{ color: `var(${stage.colorVar})` }}>
+              {stage.id} · {stage.label}
+            </div>
+            <h2 className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-100">
+              <span className="font-mono text-base" style={{ color: `var(${stage.colorVar})` }}>{screen.code}</span>
+              <span className="text-slate-600">·</span>
+              <span className="truncate">{screen.label}</span>
+            </h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Cerrar"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-700 text-slate-300 transition hover:border-cyan-400/40 hover:text-cyan-100"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="space-y-4 p-5">
+          <p className="text-sm leading-relaxed text-slate-200">{info.intro}</p>
+
+          <div>
+            <div className="mb-1.5 font-mono text-[9px] uppercase tracking-widest text-slate-500">What it does</div>
+            <ul className="space-y-1.5 text-sm leading-relaxed text-slate-300">
+              {info.details.map(detail => (
+                <li key={detail} className="flex gap-2">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-cyan-400/60" aria-hidden="true" />
+                  <span>{detail}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="rounded-md border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-1 font-mono text-[9px] uppercase tracking-widest text-cyan-300/70">How it fits the project</div>
+            <p className="text-sm leading-relaxed text-slate-300">{info.fitsIn}</p>
+          </div>
+
+          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
+            info.userAction
+              ? 'border-amber-300/25 bg-amber-300/10 text-amber-100/90'
+              : 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100/90'
+          }`}>
+            <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              <span className="font-semibold">{info.userAction ? 'You do: ' : 'Automatic: '}</span>
+              {info.userAction ?? 'no action needed — it runs on its own.'}
+            </span>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function PlaygroundPageHeader({
   screen,
   activeView,
   onSelectView,
+  onShowInfo,
 }: {
   screen: PlaygroundScreenConfig;
   activeView: PlaygroundTab;
   onSelectView: (viewId: PlaygroundTab) => void;
+  onShowInfo: () => void;
 }) {
   const stage = getPlaygroundStage(screen.stageId);
   const hasMultipleViews = screen.views.length > 1;
@@ -1009,16 +1154,25 @@ function PlaygroundPageHeader({
         <div className="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">
           {stage.id} · {stage.label}
         </div>
-        <h2 className="mt-1 flex min-w-0 items-baseline gap-2 text-xl font-semibold text-slate-100">
+        <h2 className="mt-1 flex min-w-0 items-center gap-2 text-xl font-semibold text-slate-100">
           <span
             aria-label={getPlaygroundCodeAriaLabel(screen)}
-            className="shrink-0 font-mono text-base tracking-normal"
+            className="shrink-0 self-baseline font-mono text-base tracking-normal"
             style={{ color: `var(${stage.colorVar})` }}
           >
             {screen.code}
           </span>
-          <span className="shrink-0 text-slate-600">·</span>
+          <span className="shrink-0 self-baseline text-slate-600">·</span>
           <span className="truncate">{screen.label}</span>
+          <button
+            type="button"
+            onClick={onShowInfo}
+            aria-label={`What is ${screen.label}?`}
+            title={`What is ${screen.label}?`}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-700 text-slate-400 transition hover:border-cyan-400/50 hover:bg-cyan-400/10 hover:text-cyan-100"
+          >
+            <Info className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </h2>
         {hasMultipleViews && (
           <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-widest text-slate-500">
@@ -1217,22 +1371,30 @@ export function PlaygroundDashboard({
   const [dataQuality, setDataQuality] = useState<DataQualitySnapshot | null>(null);
   const [isDataQualityRefreshing, setIsDataQualityRefreshing] = useState(false);
   const [dataQualityError, setDataQualityError] = useState<string | null>(null);
-  const [univariateEda, setUnivariateEda] = useState<UnivariateEdaSnapshot | null>(null);
-  const [isUnivariateEdaRefreshing, setIsUnivariateEdaRefreshing] = useState(false);
-  const [univariateEdaError, setUnivariateEdaError] = useState<string | null>(null);
-  const [l1EarthCoupling, setL1EarthCoupling] = useState<L1EarthCouplingSnapshot | null>(null);
-  const [isL1EarthCouplingRefreshing, setIsL1EarthCouplingRefreshing] = useState(false);
-  const [l1EarthCouplingError, setL1EarthCouplingError] = useState<string | null>(null);
+  const [exploration, setExploration] = useState<ExplorationSnapshot | null>(null);
+  const [isExplorationRefreshing, setIsExplorationRefreshing] = useState(false);
+  const [explorationError, setExplorationError] = useState<string | null>(null);
   const [mruValidation, setMruValidation] = useState<MruValidationSnapshot | null>(null);
   const [isMruValidationRefreshing, setIsMruValidationRefreshing] = useState(false);
   const [mruValidationError, setMruValidationError] = useState<string | null>(null);
+  // null = use the auto, coverage-anchored window; set once the user edits dates.
+  const [validationRange, setValidationRange] = useState<{ start: string; stop: string } | null>(null);
   const [historicPlots, setHistoricPlots] = useState<HistoricPlotsSnapshot | null>(null);
   const [isHistoricPlotsRefreshing, setIsHistoricPlotsRefreshing] = useState(false);
   const [historicPlotsError, setHistoricPlotsError] = useState<string | null>(null);
   const [plotTimeZone, setPlotTimeZone] = useState<PlotTimeZone>('UTC');
+  // Header-driven display timezone for the Live Forecast plots/feed.
+  const [activeClock, setActiveClock] = useState<'utc' | 'custom'>('utc');
+  const [customZone, setCustomZone] = useState<string>('Europe/Madrid');
+  const displayTimeZone = activeClock === 'utc' ? 'UTC' : customZone;
+  const displayTimeZoneLabel = activeClock === 'utc'
+    ? 'UTC'
+    : (CUSTOM_ZONE_OPTIONS.find(o => o.tz === customZone)?.city ?? customZone.split('/').pop()?.replace('_', ' ') ?? customZone);
   const [activeTab, setActiveTab] = useState<PlaygroundTab>('insitu');
   const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
   const [isMissionInfoOpen, setIsMissionInfoOpen] = useState(false);
+  const [isScreenInfoOpen, setIsScreenInfoOpen] = useState(false);
+  const [isHistoricAvailabilityOpen, setIsHistoricAvailabilityOpen] = useState(false);
   const [isHistoricSidebarCollapsed, setIsHistoricSidebarCollapsed] = useState(false);
   const [selectedSpacecraftIds, setSelectedSpacecraftIds] = useState<SpacecraftId[]>(['DSCOVR']);
   const [historicRange, setHistoricRange] = useState(getDefaultHistoricRange);
@@ -1244,15 +1406,11 @@ export function PlaygroundDashboard({
   const [showUnselectedHistoricSources, setShowUnselectedHistoricSources] = useState(false);
   const [selectedNearEarthSpacecraft, setSelectedNearEarthSpacecraft] = useState<string[]>(['GOES-19']);
   const [selectedLiveNearEarthSourceIds, setSelectedLiveNearEarthSourceIds] = useState<string[]>(['swpc-goes-json']);
-  const [selectedEdaVariable, setSelectedEdaVariable] = useState('all');
-  const [selectedEdaStratum, setSelectedEdaStratum] = useState<EdaStratum>('all');
-  const [selectedCouplingPairId, setSelectedCouplingPairId] = useState<string | null>(null);
   const isRequestInFlightRef = useRef(false);
   const isPipelineHealthRequestInFlightRef = useRef(false);
   const isDataQualityRequestInFlightRef = useRef(false);
   const isMruValidationRequestInFlightRef = useRef(false);
-  const isUnivariateEdaRequestInFlightRef = useRef(false);
-  const isL1EarthCouplingRequestInFlightRef = useRef(false);
+  const isExplorationRequestInFlightRef = useRef(false);
   const isHistoricPlotsRequestInFlightRef = useRef(false);
   const isMountedRef = useRef(false);
   const tabMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1470,16 +1628,10 @@ export function PlaygroundDashboard({
     }
   }, [historicRange.start, historicRange.stop]);
 
-  const refreshMruValidation = useCallback(async (options: { showActivity?: boolean } = {}) => {
+  const refreshMruValidation = useCallback(async (
+    options: { showActivity?: boolean; rangeOverride?: { start: string; stop: string } } = {},
+  ) => {
     if (isMruValidationRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setMruValidationError('Invalid validation range');
       return;
     }
 
@@ -1491,8 +1643,19 @@ export function PlaygroundDashboard({
     setMruValidationError(null);
 
     try {
-      const params = new URLSearchParams({ startUtc, stopUtc });
-      const response = await fetch(`/api/playground/mru-validation?${params.toString()}`, {
+      // No range set yet → let the service auto-anchor to real data coverage.
+      const activeRange = options.rangeOverride ?? validationRange;
+      const params = new URLSearchParams();
+      if (activeRange) {
+        const startUtc = datetimeLocalToUtcIso(activeRange.start);
+        const stopUtc = datetimeLocalToUtcIso(activeRange.stop);
+        if (startUtc && stopUtc) {
+          params.set('startUtc', startUtc);
+          params.set('stopUtc', stopUtc);
+        }
+      }
+      const query = params.toString();
+      const response = await fetch(`/api/playground/mru-validation${query ? `?${query}` : ''}`, {
         cache: 'no-store',
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
@@ -1509,6 +1672,12 @@ export function PlaygroundDashboard({
       }
 
       setMruValidation(nextSnapshot);
+      // Reflect the window actually used (auto-anchored) into the date pickers,
+      // without overriding a window the user has already set.
+      setValidationRange(current => current ?? {
+        start: nextSnapshot.range.startUtc.slice(0, 16),
+        stop: nextSnapshot.range.stopUtc.slice(0, 16),
+      });
     } catch (error) {
       if (!isMountedRef.current) {
         return;
@@ -1522,133 +1691,54 @@ export function PlaygroundDashboard({
         setIsMruValidationRefreshing(false);
       }
     }
-  }, [historicRange.start, historicRange.stop]);
+  }, [validationRange]);
 
-  const refreshUnivariateEda = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isUnivariateEdaRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setUnivariateEdaError('Invalid univariate EDA range');
+  const refreshExploration = useCallback(async (options: { showActivity?: boolean } = {}) => {
+    if (isExplorationRequestInFlightRef.current) {
       return;
     }
 
     const showActivity = options.showActivity ?? true;
-    isUnivariateEdaRequestInFlightRef.current = true;
+    isExplorationRequestInFlightRef.current = true;
     if (showActivity) {
-      setIsUnivariateEdaRefreshing(true);
+      setIsExplorationRefreshing(true);
     }
-    setUnivariateEdaError(null);
+    setExplorationError(null);
 
     try {
-      const params = new URLSearchParams({
-        startUtc,
-        stopUtc,
-      });
-      const response = await fetch(`/api/playground/univariate-eda?${params.toString()}`, {
+      // The exploration service auto-selects a historical window with data, so
+      // no range params are sent — it just works without user action.
+      const response = await fetch('/api/playground/exploration', {
         cache: 'no-store',
         credentials: 'same-origin',
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: { Accept: 'application/json' },
       });
 
       if (!response.ok) {
-        throw new Error(`Univariate EDA request failed with ${response.status}`);
+        throw new Error(`Exploration request failed with ${response.status}`);
       }
 
-      const nextUnivariateEda = await response.json() as UnivariateEdaSnapshot;
+      const nextExploration = await response.json() as ExplorationSnapshot;
 
       if (!isMountedRef.current) {
         return;
       }
 
-      setUnivariateEda(nextUnivariateEda);
-      if (!nextUnivariateEda.availableStrata.includes(selectedEdaStratum)) {
-        setSelectedEdaStratum('all');
-      }
+      setExploration(nextExploration);
     } catch (error) {
       if (!isMountedRef.current) {
         return;
       }
 
-      setUnivariateEdaError(error instanceof Error ? error.message : 'Univariate EDA request failed');
+      setExplorationError(error instanceof Error ? error.message : 'Exploration request failed');
     } finally {
-      isUnivariateEdaRequestInFlightRef.current = false;
+      isExplorationRequestInFlightRef.current = false;
 
       if (showActivity && isMountedRef.current) {
-        setIsUnivariateEdaRefreshing(false);
+        setIsExplorationRefreshing(false);
       }
     }
-  }, [historicRange.start, historicRange.stop, selectedEdaStratum]);
-
-  const refreshL1EarthCoupling = useCallback(async (options: { showActivity?: boolean } = {}) => {
-    if (isL1EarthCouplingRequestInFlightRef.current) {
-      return;
-    }
-
-    const startUtc = datetimeLocalToUtcIso(historicRange.start);
-    const stopUtc = datetimeLocalToUtcIso(historicRange.stop);
-
-    if (!startUtc || !stopUtc) {
-      setL1EarthCouplingError('Invalid L1-Earth coupling range');
-      return;
-    }
-
-    const showActivity = options.showActivity ?? true;
-    isL1EarthCouplingRequestInFlightRef.current = true;
-    if (showActivity) {
-      setIsL1EarthCouplingRefreshing(true);
-    }
-    setL1EarthCouplingError(null);
-
-    try {
-      const params = new URLSearchParams({
-        startUtc,
-        stopUtc,
-      });
-      const response = await fetch(`/api/playground/l1-earth-coupling?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`L1-Earth coupling request failed with ${response.status}`);
-      }
-
-      const nextL1EarthCoupling = await response.json() as L1EarthCouplingSnapshot;
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setL1EarthCoupling(nextL1EarthCoupling);
-      setSelectedCouplingPairId(currentPairId => (
-        currentPairId && nextL1EarthCoupling.pairs.some(pair => pair.id === currentPairId)
-          ? currentPairId
-          : nextL1EarthCoupling.pairs[0]?.id ?? null
-      ));
-    } catch (error) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setL1EarthCouplingError(error instanceof Error ? error.message : 'L1-Earth coupling request failed');
-    } finally {
-      isL1EarthCouplingRequestInFlightRef.current = false;
-
-      if (showActivity && isMountedRef.current) {
-        setIsL1EarthCouplingRefreshing(false);
-      }
-    }
-  }, [historicRange.start, historicRange.stop]);
+  }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1737,18 +1827,18 @@ export function PlaygroundDashboard({
     };
   }, [activeTab, hasDataQuality, refreshDataQuality]);
 
-  const hasUnivariateEda = univariateEda !== null;
+  const hasExploration = exploration !== null;
 
   useEffect(() => {
-    if (activeTab !== 'eda') {
+    if (activeTab !== 'eda' && activeTab !== 'coupling') {
       return;
     }
 
     let initialRefreshTimeout: number | null = null;
 
-    if (!hasUnivariateEda) {
+    if (!hasExploration) {
       initialRefreshTimeout = window.setTimeout(() => {
-        void refreshUnivariateEda({ showActivity: true });
+        void refreshExploration({ showActivity: true });
       }, 0);
     }
 
@@ -1757,29 +1847,7 @@ export function PlaygroundDashboard({
         window.clearTimeout(initialRefreshTimeout);
       }
     };
-  }, [activeTab, hasUnivariateEda, refreshUnivariateEda]);
-
-  const hasL1EarthCoupling = l1EarthCoupling !== null;
-
-  useEffect(() => {
-    if (activeTab !== 'coupling') {
-      return;
-    }
-
-    let initialRefreshTimeout: number | null = null;
-
-    if (!hasL1EarthCoupling) {
-      initialRefreshTimeout = window.setTimeout(() => {
-        void refreshL1EarthCoupling({ showActivity: true });
-      }, 0);
-    }
-
-    return () => {
-      if (initialRefreshTimeout !== null) {
-        window.clearTimeout(initialRefreshTimeout);
-      }
-    };
-  }, [activeTab, hasL1EarthCoupling, refreshL1EarthCoupling]);
+  }, [activeTab, hasExploration, refreshExploration]);
 
   const hasMruValidation = mruValidation !== null;
 
@@ -2131,7 +2199,12 @@ export function PlaygroundDashboard({
         </div>
 
         <div className="flex items-center gap-3">
-          <LiveDualClock />
+          <LiveDualClock
+            activeClock={activeClock}
+            onSelectClock={setActiveClock}
+            customZone={customZone}
+            onChangeCustomZone={setCustomZone}
+          />
           {refreshError && (
             <div className="hidden max-w-64 truncate font-mono text-[10px] uppercase tracking-widest text-rose-300 md:block" title={refreshError}>
               Sync error
@@ -2155,6 +2228,7 @@ export function PlaygroundDashboard({
         screen={activeScreen}
         activeView={activeTab}
         onSelectView={setActiveTab}
+        onShowInfo={() => setIsScreenInfoOpen(true)}
       />
 
       {activeTab === 'insitu' ? (
@@ -2438,6 +2512,7 @@ export function PlaygroundDashboard({
                 sources={allHistoricSources}
                 selectedSourceIds={selectedHistoricSourceIds}
                 onToggleSource={toggleHistoricSource}
+                onOpenAvailability={() => setIsHistoricAvailabilityOpen(true)}
                 onExpand={() => setIsHistoricSidebarCollapsed(false)}
               />
             ) : (
@@ -2445,7 +2520,15 @@ export function PlaygroundDashboard({
                   <section className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-4 shadow-2xl backdrop-blur-xl">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-2">
-                        <CalendarRange className="h-4 w-4 shrink-0 text-cyan-300" aria-hidden="true" />
+                        <button
+                          type="button"
+                          aria-label="Open historical availability calendar"
+                          title="Historical availability"
+                          onClick={() => setIsHistoricAvailabilityOpen(true)}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-400/30 bg-cyan-400/10 text-cyan-200 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 hover:text-cyan-50"
+                        >
+                          <CalendarRange className="h-4 w-4" aria-hidden="true" />
+                        </button>
                         <h2 className="truncate text-xs font-semibold uppercase tracking-widest text-slate-300">
                           Historic window
                         </h2>
@@ -2470,9 +2553,6 @@ export function PlaygroundDashboard({
                             setHistoricRange(current => ({ ...current, start: event.target.value }));
                             setHistoricPlots(null);
                             setDataQuality(null);
-                            setUnivariateEda(null);
-                            setL1EarthCoupling(null);
-                            setMruValidation(null);
                           }}
                           className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
                         />
@@ -2486,9 +2566,6 @@ export function PlaygroundDashboard({
                             setHistoricRange(current => ({ ...current, stop: event.target.value }));
                             setHistoricPlots(null);
                             setDataQuality(null);
-                            setUnivariateEda(null);
-                            setL1EarthCoupling(null);
-                            setMruValidation(null);
                           }}
                           className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-400/60"
                         />
@@ -2642,6 +2719,7 @@ export function PlaygroundDashboard({
           snapshot={pipelineHealth}
           isLoading={isPipelineHealthRefreshing}
           error={pipelineHealthError}
+          activeExperiment={null}
           onRefresh={() => {
             void refreshPipelineHealth({ showActivity: true });
           }}
@@ -2651,44 +2729,41 @@ export function PlaygroundDashboard({
           snapshot={dataQuality}
           isLoading={isDataQualityRefreshing}
           error={dataQualityError}
+          activeExperiment={null}
           range={historicRange}
           onRangeChange={(nextRange) => {
             setHistoricRange(nextRange);
             setDataQuality(null);
-            setUnivariateEda(null);
-            setL1EarthCoupling(null);
-            setMruValidation(null);
           }}
           onRefresh={() => {
             void refreshDataQuality({ showActivity: true });
           }}
         />
       ) : activeTab === 'eda' ? (
-        <UnivariateEdaPanel
-          snapshot={univariateEda}
-          isLoading={isUnivariateEdaRefreshing}
-          error={univariateEdaError}
-          selectedVariable={selectedEdaVariable}
-          selectedStratum={selectedEdaStratum}
-          onVariableChange={setSelectedEdaVariable}
-          onStratumChange={setSelectedEdaStratum}
+        <ExplorationUnivariatePanel
+          snapshot={exploration}
+          isLoading={isExplorationRefreshing}
+          error={explorationError}
           onRefresh={() => {
-            void refreshUnivariateEda({ showActivity: true });
+            void refreshExploration({ showActivity: true });
           }}
         />
       ) : activeTab === 'coupling' ? (
-        <L1EarthCouplingPanel
-          snapshot={l1EarthCoupling}
-          isLoading={isL1EarthCouplingRefreshing}
-          error={l1EarthCouplingError}
-          selectedPairId={selectedCouplingPairId}
-          onSelectedPairChange={setSelectedCouplingPairId}
+        <ExplorationCouplingPanel
+          snapshot={exploration}
+          isLoading={isExplorationRefreshing}
+          error={explorationError}
           onRefresh={() => {
-            void refreshL1EarthCoupling({ showActivity: true });
+            void refreshExploration({ showActivity: true });
           }}
         />
       ) : activeTab === 'overview' ? (
         <ModelsOverviewPanel
+          onGoToValidation={() => setActiveTab('validation')}
+          onGoToLive={() => setActiveTab('forecast')}
+        />
+      ) : activeTab === 'datapipeline' ? (
+        <DataPipelinePanel
           onGoToValidation={() => setActiveTab('validation')}
           onGoToLive={() => setActiveTab('forecast')}
         />
@@ -2697,10 +2772,14 @@ export function PlaygroundDashboard({
           snapshot={mruValidation}
           isLoading={isMruValidationRefreshing}
           error={mruValidationError}
-          range={historicRange}
+          range={validationRange ?? { start: '', stop: '' }}
           onRangeChange={(nextRange) => {
-            setHistoricRange(nextRange);
+            setValidationRange(nextRange);
+          }}
+          onSelectInterval={(nextRange) => {
+            setValidationRange(nextRange);
             setMruValidation(null);
+            void refreshMruValidation({ showActivity: true, rangeOverride: nextRange });
           }}
           onRefresh={() => {
             void refreshMruValidation({ showActivity: true });
@@ -2715,6 +2794,8 @@ export function PlaygroundDashboard({
           onRefresh={() => {
             void refreshTelemetry({ showActivity: true });
           }}
+          timeZone={displayTimeZone}
+          timeZoneLabel={displayTimeZoneLabel}
         />
       )}
 
@@ -2722,6 +2803,20 @@ export function PlaygroundDashboard({
         <MissionInfoModal
           spacecraftTelemetry={spacecraftTelemetry}
           onClose={() => setIsMissionInfoOpen(false)}
+        />
+      )}
+
+      {isScreenInfoOpen && (
+        <ScreenInfoModal screen={activeScreen} onClose={() => setIsScreenInfoOpen(false)} />
+      )}
+
+      {isHistoricAvailabilityOpen && (
+        <HistoricAvailabilityCalendar
+          sources={allHistoricSources}
+          selectedSourceIds={selectedHistoricSourceIds}
+          range={historicRange}
+          getPlotCount={getHistoricPlotCount}
+          onClose={() => setIsHistoricAvailabilityOpen(false)}
         />
       )}
     </div>

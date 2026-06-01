@@ -888,15 +888,23 @@ export function InSituOrbitScene({
   selectedLiveNearEarthSourceIds,
   selectedNearEarthSpacecraft,
 }: InSituOrbitSceneProps) {
-  const [geometryTimeMs, setGeometryTimeMs] = useState(() => Date.now());
+  // Start at a stable value so the server and the first client render produce
+  // identical HTML; the real clock is set right after mount. Initialising with
+  // Date.now() (even lazily) runs on both server and client and captures
+  // different seconds, which causes a hydration mismatch.
+  const [geometryTimeMs, setGeometryTimeMs] = useState(0);
   const selectedSpacecraftSet = useMemo(() => new Set(selectedSpacecraftIds), [selectedSpacecraftIds]);
   const selectedNearEarthSet = useMemo(() => new Set(selectedNearEarthSpacecraft), [selectedNearEarthSpacecraft]);
   const geometryTime = useMemo(() => new Date(geometryTimeMs), [geometryTimeMs]);
 
   useEffect(() => {
+    const initialTimeout = window.setTimeout(() => setGeometryTimeMs(Date.now()), 0);
     const interval = window.setInterval(() => setGeometryTimeMs(Date.now()), GEOMETRY_REFRESH_MS);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initialTimeout);
+      window.clearInterval(interval);
+    };
   }, []);
 
   const l1Objects = useMemo<L1OrbitObject[]>(() => {
