@@ -32,11 +32,17 @@ export const DataReadinessPanel: React.FC<DataReadinessPanelProps> = ({
   celestrakData,
 }) => {
   const { selectedTle } = useSatelliteSelection();
-  const [readinessTime, setReadinessTime] = useState(() => Date.now());
+  // Stable initial value so SSR and the first client render match (avoids a
+  // hydration mismatch); the real clock is set right after mount.
+  const [readinessTime, setReadinessTime] = useState(0);
 
   useEffect(() => {
+    const initial = window.setTimeout(() => setReadinessTime(Date.now()), 0);
     const interval = setInterval(() => setReadinessTime(Date.now()), 2000);
-    return () => clearInterval(interval);
+    return () => {
+      window.clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, []);
 
   const propagatedData: PropagatedSatelliteData | null = useMemo(() => {

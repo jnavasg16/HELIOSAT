@@ -441,6 +441,42 @@ export async function fetchHapiSeries(
   }
 }
 
+/**
+ * Fetch a HAPI series over an arbitrarily long window by splitting it into
+ * sequential sub-requests, so large ranges don't hit the per-request timeout.
+ */
+export async function fetchHapiSeriesChunked(
+  datasetId: string,
+  parameters: string[],
+  range: HistoricPlotRange,
+  chunkDays = 20,
+): Promise<HapiSeriesResult> {
+  const startMs = parseTimestampMs(range.startUtc);
+  const stopMs = parseTimestampMs(range.stopUtc);
+  const chunkMs = chunkDays * 24 * 60 * 60 * 1000;
+
+  if (startMs === null || stopMs === null || stopMs <= startMs || stopMs - startMs <= chunkMs) {
+    return fetchHapiSeries(datasetId, parameters, range);
+  }
+
+  const rows: unknown[][] = [];
+  const warnings = new Set<string>();
+
+  for (let chunkStart = startMs; chunkStart < stopMs; chunkStart += chunkMs) {
+    const chunkStop = Math.min(chunkStart + chunkMs, stopMs);
+    const result = await fetchHapiSeries(datasetId, parameters, {
+      startUtc: toIsoUtc(chunkStart),
+      stopUtc: toIsoUtc(chunkStop),
+    });
+    rows.push(...result.rows);
+    for (const warning of result.warnings) {
+      warnings.add(warning);
+    }
+  }
+
+  return { rows, warnings: [...warnings] };
+}
+
 function unwrapTypedObject(value: unknown) {
   if (Array.isArray(value) && value.length === 2 && typeof value[0] === 'string') {
     return value[1];

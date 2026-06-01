@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentAdminState } from '@/lib/supabase/admin';
 import {
-  buildMruValidationSnapshot,
-  type MruValidationSnapshot,
-} from '@/services/mruValidationService';
+  buildExplorationSnapshot,
+  type ExplorationSnapshot,
+} from '@/services/explorationService';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-// Long windows fetch many chunks from CDAWeb; give the request room.
-export const maxDuration = 300;
 
-const CACHE_TTL_MS = 60 * 1000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 let cachedResponse: {
   cacheKey: string;
   expiresAt: number;
-  snapshot: MruValidationSnapshot;
+  snapshot: ExplorationSnapshot;
 } | null = null;
 
 export async function GET(request: NextRequest) {
@@ -38,7 +36,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const snapshot = await buildMruValidationSnapshot({
+  const snapshot = await buildExplorationSnapshot({
     startUtc: startUtc || undefined,
     stopUtc: stopUtc || undefined,
   });

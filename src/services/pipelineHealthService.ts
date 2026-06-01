@@ -15,7 +15,7 @@ import {
 } from './pipeline/nceiGoesArchiveConnector';
 
 export type PipelineSourceGroup = 'l1-live' | 'l1-historic' | 'near-earth';
-export type PipelineSourceStatus = 'live' | 'historic' | 'stale' | 'off' | 'error';
+export type PipelineSourceStatus = 'live' | 'historic' | 'stale' | 'off' | 'error' | 'not-wired';
 export type PipelineLogLevel = 'info' | 'warning' | 'error';
 
 export interface PipelineSparkPoint {
@@ -372,6 +372,14 @@ function calculateThroughputRowsPerMinute(rowTimestampsMs: number[]) {
 
 function getCurrentLogMessage(source: PublicSpaceWeatherSource, observation: RuntimeObservation | null) {
   if (!observation) {
+    if (source.readiness === 'gap') {
+      return 'Known public-data gap; no robust no-key ingestion source is wired.';
+    }
+
+    if (source.readiness === 'candidate' || source.readiness === 'archive') {
+      return 'Source is catalogued for future use, but no ingestion health connector is wired yet.';
+    }
+
     return 'Connector registered; no runtime ingestion observations in this process yet.';
   }
 
@@ -476,6 +484,7 @@ export function buildPipelineHealthSnapshot(
     const connectorRegistration = getSourceConnectorRegistration(source.id);
     const runtimeObservation = getRuntimeObservationForSource(source, telemetryData.spacecraftTelemetry);
     const lastSampleTimestampMs = parseTimestampMs(runtimeObservation?.lastSampleTimestampUtc);
+    const implementationStatus = connectorRegistration?.implementationStatus ?? 'registered';
 
     return {
       source,
@@ -486,11 +495,11 @@ export function buildPipelineHealthSnapshot(
         provider: source.provider,
         endpoint: source.endpoint,
         group: getSourceGroup(source),
-        status: runtimeObservation?.status ?? 'off',
+        status: runtimeObservation?.status ?? (implementationStatus === 'registered' ? 'not-wired' : 'off'),
         readiness: source.readiness,
         refreshMode: source.cadence,
         protocol: connectorRegistration?.protocol ?? 'archive-files',
-        implementationStatus: connectorRegistration?.implementationStatus ?? 'registered',
+        implementationStatus,
         lastSampleTimestampUtc: runtimeObservation?.lastSampleTimestampUtc ?? null,
         lastSampleDeltaSeconds: lastSampleTimestampMs === null
           ? null

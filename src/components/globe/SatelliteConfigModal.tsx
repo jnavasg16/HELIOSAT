@@ -37,7 +37,9 @@ export const SatelliteConfigModal: React.FC = () => {
   } = useSatelliteConfig();
 
   const { selectedTle, setSelectedTle } = useSatelliteSelection();
-  const [propagationTime, setPropagationTime] = useState(() => Date.now());
+  // Stable initial value so SSR and the first client render match (avoids a
+  // hydration mismatch); the real clock is set right after mount.
+  const [propagationTime, setPropagationTime] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeKey = selectedTle ? getSatelliteKey(selectedTle) : null;
 
@@ -62,6 +64,11 @@ export const SatelliteConfigModal: React.FC = () => {
       document.body.style.overflow = originalOverflow;
     };
   }, [isModalOpen]);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => setPropagationTime(Date.now()), 0);
+    return () => window.clearTimeout(initial);
+  }, []);
 
   useEffect(() => {
     if (!isModalOpen) return;

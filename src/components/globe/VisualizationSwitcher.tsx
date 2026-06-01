@@ -69,7 +69,9 @@ class GlobeRenderBoundary extends React.Component<
 
 export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasmaData, noaaEphemerisData, className = '' }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('earth');
-  const [propagationTime, setPropagationTime] = useState(() => Date.now());
+  // Stable initial value so SSR and the first client render match (avoids a
+  // hydration mismatch); the real clock is set right after mount.
+  const [propagationTime, setPropagationTime] = useState(0);
 
   const { selectedTle } = useSatelliteSelection();
   const {
@@ -95,8 +97,12 @@ export const VisualizationSwitcher: React.FC<Props> = ({ noaaMagData, noaaPlasma
     : tleData.errorMessage ?? 'CelesTrak unavailable';
 
   useEffect(() => {
+    const initial = window.setTimeout(() => setPropagationTime(Date.now()), 0);
     const id = setInterval(() => setPropagationTime(Date.now()), PROPAGATION_INTERVAL_MS);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(initial);
+      clearInterval(id);
+    };
   }, []);
 
   const propagated = useMemo(() => {

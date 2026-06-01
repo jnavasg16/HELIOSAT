@@ -33,6 +33,7 @@ export type PlaygroundView =
   | 'eda'
   | 'coupling'
   | 'overview'
+  | 'datapipeline'
   | 'validation'
   | 'forecast';
 
@@ -118,20 +119,20 @@ export const PLAYGROUND_SCREENS = [
     id: 'exploration',
     code: '2A',
     label: 'Exploration',
-    description: 'Univariate behaviour and L1-Earth coupling',
+    description: 'Solar-wind distributions and measured L1→Earth travel time',
     stageId: 2,
     icon: Sigma,
     views: [
       {
         id: 'eda',
         label: 'Univariate',
-        description: 'Distribution, stationarity, ACF',
+        description: 'Distributions of each variable at L1 and at Earth',
         icon: Sigma,
       },
       {
         id: 'coupling',
         label: 'Coupling',
-        description: 'CCF, lag, MI, coherence',
+        description: 'Measured L1→Earth travel time vs the MRU estimate',
         icon: Waves,
       },
     ],
@@ -149,6 +150,12 @@ export const PLAYGROUND_SCREENS = [
         label: 'Models',
         description: 'How the forecast is computed',
         icon: Ruler,
+      },
+      {
+        id: 'datapipeline',
+        label: 'Data & pipeline',
+        description: 'Training, validation and live data',
+        icon: Database,
       },
     ],
   },

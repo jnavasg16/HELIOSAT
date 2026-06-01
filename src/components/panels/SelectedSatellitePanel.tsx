@@ -58,12 +58,18 @@ const LocationBlock: React.FC<{ data: PropagatedSatelliteData | null }> = ({ dat
 export const SelectedSatellitePanel: React.FC = () => {
   const { selectedTle, setSelectedTle } = useSatelliteSelection();
   const { openModal } = useSatelliteConfig();
-  const [telemetryTime, setTelemetryTime] = useState(() => Date.now());
+  // Stable initial value so SSR and the first client render match (avoids a
+  // hydration mismatch); the real clock is set right after mount.
+  const [telemetryTime, setTelemetryTime] = useState(0);
 
   // Live-update propagated telemetry every second
   useEffect(() => {
+    const initial = window.setTimeout(() => setTelemetryTime(Date.now()), 0);
     const id = setInterval(() => setTelemetryTime(Date.now()), 1000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(initial);
+      clearInterval(id);
+    };
   }, []);
 
   const prop: PropagatedSatelliteData | null = useMemo(() => {

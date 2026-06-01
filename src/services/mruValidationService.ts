@@ -11,7 +11,10 @@
  * frame-independent and are scored; Bz is shown for context only (ACE reports
  * GSE here, OMNI reports GSM, so a direct error would mix in a frame rotation).
  */
-import { fetchHapiSeries, toFiniteNumber, type HapiSeriesResult } from './historicPlotService';
+import { resolveCoverageAnchoredRange } from './dataCoverageService';
+import { fetchHapiSeriesChunked, toFiniteNumber, type HapiSeriesResult } from './historicPlotService';
+import type { L1EarthSample } from './l1EarthData';
+import { loadMlModel, predictAtTimes } from './mlModelService';
 import {
   NOMINAL_L1_DISTANCE_KM,
   propagateL1Series,
@@ -30,6 +33,7 @@ export interface MruValidationMetric {
   mae: number | null;
   rmse: number | null;
   bias: number | null;
+  r2: number | null;
   truthMean: number | null;
   relativeMaePct: number | null;
 }
@@ -45,6 +49,7 @@ export interface MruValidationSeries {
   unit: string;
   l1: MruValidationPoint[];
   predicted: MruValidationPoint[];
+  mlPredicted: MruValidationPoint[];
   truth: MruValidationPoint[];
   note?: string;
 }
@@ -52,17 +57,23 @@ export interface MruValidationSeries {
 export interface MruValidationSnapshot {
   generatedAtUtc: string;
   range: { startUtc: string; stopUtc: string };
+  autoSelected: boolean;
   l1Source: string;
   truthSource: string;
   distanceKm: number;
   meanLagMinutes: number | null;
   sampleCount: { l1: number; truth: number; matched: number };
   metrics: MruValidationMetric[];
+  mlAvailable: boolean;
+  mlTrainedAtUtc: string | null;
+  mlMetrics: MruValidationMetric[] | null;
+  mlOverallSkillPct: number | null;
   series: MruValidationSeries[];
   warnings: string[];
 }
 
 const MAX_SERIES_POINTS = 320;
+const MAX_WINDOW_DAYS = 120;
 const PLASMA_MAG_JOIN_TOLERANCE_MS = 120_000;
 const PREDICTED_TRUTH_JOIN_TOLERANCE_MS = 90_000;
 
@@ -146,7 +157,7 @@ function computeMetric(
   const count = valid.length;
 
   if (count === 0) {
-    return { variableId, label, unit, count: 0, mae: null, rmse: null, bias: null, truthMean: null, relativeMaePct: null };
+    return { variableId, label, unit, count: 0, mae: null, rmse: null, bias: null, r2: null, truthMean: null, relativeMaePct: null };
   }
 
   let sumAbs = 0;
@@ -164,6 +175,7 @@ function computeMetric(
 
   const mae = sumAbs / count;
   const truthMean = sumTruth / count;
+  const ssTot = valid.reduce((sum, { truth }) => sum + (truth - truthMean) ** 2, 0);
 
   return {
     variableId,
@@ -173,6 +185,7 @@ function computeMetric(
     mae,
     rmse: Math.sqrt(sumSq / count),
     bias: sumResidual / count,
+    r2: ssTot > 0 ? 1 - sumSq / ssTot : null,
     truthMean,
     relativeMaePct: truthMean !== 0 ? (mae / Math.abs(truthMean)) * 100 : null,
   };
@@ -182,40 +195,66 @@ function toPoint(ms: number, value: number | null): MruValidationPoint {
   return { timeUtc: new Date(ms).toISOString(), value };
 }
 
-export async function buildMruValidationSnapshot(range: {
-  startUtc: string;
-  stopUtc: string;
+export async function buildMruValidationSnapshot(range?: {
+  startUtc?: string;
+  stopUtc?: string;
 }): Promise<MruValidationSnapshot> {
   const generatedAtUtc = new Date().toISOString();
   const warnings: string[] = [];
   const l1Source = 'ACE key parameters (CDAWeb HAPI)';
   const truthSource = 'OMNI HRO 1-min (CDAWeb HAPI)';
 
+  // When no window is given, anchor to the datasets' real coverage so the
+  // backtest lands on data automatically (the machine clock runs ahead of the
+  // ~2-week-lagged archives).
+  const autoSelected = !range?.startUtc || !range?.stopUtc;
+  const rawRange = autoSelected
+    ? ((await resolveCoverageAnchoredRange(3)) ?? { startUtc: range?.startUtc ?? '', stopUtc: range?.stopUtc ?? '' })
+    : { startUtc: range.startUtc as string, stopUtc: range.stopUtc as string };
+
+  // Cap very long windows: even with chunked fetching, multi-month 1-min data is
+  // slow and heavy. This keeps backtests responsive and avoids aborts.
+  const rawStartMs = parseTimeMs(rawRange.startUtc);
+  const rawStopMs = parseTimeMs(rawRange.stopUtc);
+  let resolvedRange = rawRange;
+  if (rawStartMs !== null && rawStopMs !== null && rawStopMs - rawStartMs > MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+    resolvedRange = {
+      startUtc: new Date(rawStopMs - MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      stopUtc: rawRange.stopUtc,
+    };
+    warnings.push(`Window capped to ${MAX_WINDOW_DAYS} days — longer backtests are too slow; pick a sub-window or a recommended interval.`);
+  }
+
   const base: MruValidationSnapshot = {
     generatedAtUtc,
-    range,
+    range: resolvedRange,
+    autoSelected,
     l1Source,
     truthSource,
     distanceKm: NOMINAL_L1_DISTANCE_KM,
     meanLagMinutes: null,
     sampleCount: { l1: 0, truth: 0, matched: 0 },
     metrics: [],
+    mlAvailable: false,
+    mlTrainedAtUtc: null,
+    mlMetrics: null,
+    mlOverallSkillPct: null,
     series: [],
     warnings,
   };
 
-  const startMs = parseTimeMs(range.startUtc);
-  const stopMs = parseTimeMs(range.stopUtc);
+  const startMs = parseTimeMs(resolvedRange.startUtc);
+  const stopMs = parseTimeMs(resolvedRange.stopUtc);
 
   if (startMs === null || stopMs === null || stopMs <= startMs) {
-    warnings.push('Invalid time range: choose a start before the stop.');
+    warnings.push('No usable data window (coverage probe failed and no valid range was given).');
     return base;
   }
 
   const [plasmaResult, magResult, omniResult]: HapiSeriesResult[] = await Promise.all([
-    fetchHapiSeries('AC_K0_SWE', ['Np', 'Vp', 'Tpr'], range),
-    fetchHapiSeries('AC_K0_MFI', ['Magnitude', 'BGSEc'], range),
-    fetchHapiSeries('OMNI_HRO_1MIN', ['F', 'BZ_GSM', 'flow_speed', 'proton_density'], range),
+    fetchHapiSeriesChunked('AC_K0_SWE', ['Np', 'Vp', 'Tpr'], resolvedRange),
+    fetchHapiSeriesChunked('AC_K0_MFI', ['Magnitude', 'BGSEc'], resolvedRange),
+    fetchHapiSeriesChunked('OMNI_HRO_1MIN', ['F', 'BZ_GSM', 'flow_speed', 'proton_density'], resolvedRange),
   ]);
 
   warnings.push(...plasmaResult.warnings, ...magResult.warnings, ...omniResult.warnings);
@@ -325,6 +364,49 @@ export async function buildMruValidationSnapshot(range: {
 
   const meanLagMinutes = predicted.reduce((sum, sample) => sum + sample.lagMinutes, 0) / predicted.length;
 
+  // --- ML model (if a trained artifact exists): predict the same truth points ---
+  const l1ForMl: L1EarthSample[] = l1Samples.map(s => ({
+    ms: new Date(s.timeUtc).getTime(),
+    speed: s.speedKmS,
+    density: s.densityPerCm3,
+    bt: s.btNt,
+    bz: s.bzNt,
+  }));
+  const mlArtifact = await loadMlModel();
+  const mlAvailable = mlArtifact !== null;
+  const truthTimesMs = truthPoints.map(point => point.ms);
+  // anchorToInput mirrors how the model is served live (correction over the input
+  // baseline, not the ACE->OMNI absolute level) so validation matches live forecast.
+  const mlAtTruth = (variableId: 'speed' | 'density' | 'bt' | 'bz') =>
+    mlArtifact ? predictAtTimes(mlArtifact, l1ForMl, variableId, truthTimesMs, { anchorToInput: true }) : truthTimesMs.map(() => null);
+  const mlSpeedTruth = mlAtTruth('speed');
+  const mlDensityTruth = mlAtTruth('density');
+  const mlBtTruth = mlAtTruth('bt');
+  const mlBzTruth = mlAtTruth('bz');
+
+  let mlMetrics: MruValidationMetric[] | null = null;
+  let mlOverallSkillPct: number | null = null;
+  if (mlArtifact) {
+    const matchedTimes = matched.map(m => m.a.ms);
+    const mlSpeed = predictAtTimes(mlArtifact, l1ForMl, 'speed', matchedTimes, { anchorToInput: true });
+    const mlDensity = predictAtTimes(mlArtifact, l1ForMl, 'density', matchedTimes, { anchorToInput: true });
+    const mlBt = predictAtTimes(mlArtifact, l1ForMl, 'bt', matchedTimes, { anchorToInput: true });
+    mlMetrics = [
+      computeMetric('speed', 'Solar-wind speed', 'km/s', matched.map((m, i) => ({ predicted: mlSpeed[i], truth: m.a.speed }))),
+      computeMetric('density', 'Proton density', 'n/cc', matched.map((m, i) => ({ predicted: mlDensity[i], truth: m.a.density }))),
+      computeMetric('bt', 'Field magnitude |B|', 'nT', matched.map((m, i) => ({ predicted: mlBt[i], truth: m.a.bt }))),
+    ];
+    const skills: number[] = [];
+    for (let i = 0; i < mlMetrics.length; i += 1) {
+      const mlRmse = mlMetrics[i].rmse;
+      const mruRmse = metrics[i].rmse;
+      if (mlRmse !== null && mruRmse !== null && mruRmse > 0) {
+        skills.push((1 - mlRmse / mruRmse) * 100);
+      }
+    }
+    mlOverallSkillPct = skills.length > 0 ? skills.reduce((sum, value) => sum + value, 0) / skills.length : null;
+  }
+
   const series: MruValidationSeries[] = [
     {
       variableId: 'speed',
@@ -332,6 +414,7 @@ export async function buildMruValidationSnapshot(range: {
       unit: 'km/s',
       l1: downsample(l1Samples.map(s => toPoint(new Date(s.timeUtc).getTime(), s.speedKmS))),
       predicted: downsample(predicted.map(s => toPoint(new Date(s.arrivalTimeUtc).getTime(), s.speedKmS))),
+      mlPredicted: downsample(truthPoints.map((p, i) => toPoint(p.ms, mlSpeedTruth[i]))),
       truth: downsample(truthPoints.map(p => toPoint(p.ms, p.speed))),
     },
     {
@@ -340,6 +423,7 @@ export async function buildMruValidationSnapshot(range: {
       unit: 'n/cc',
       l1: downsample(l1Samples.map(s => toPoint(new Date(s.timeUtc).getTime(), s.densityPerCm3))),
       predicted: downsample(predicted.map(s => toPoint(new Date(s.arrivalTimeUtc).getTime(), s.densityPerCm3))),
+      mlPredicted: downsample(truthPoints.map((p, i) => toPoint(p.ms, mlDensityTruth[i]))),
       truth: downsample(truthPoints.map(p => toPoint(p.ms, p.density))),
     },
     {
@@ -348,6 +432,7 @@ export async function buildMruValidationSnapshot(range: {
       unit: 'nT',
       l1: downsample(l1Samples.map(s => toPoint(new Date(s.timeUtc).getTime(), s.btNt))),
       predicted: downsample(predicted.map(s => toPoint(new Date(s.arrivalTimeUtc).getTime(), s.btNt))),
+      mlPredicted: downsample(truthPoints.map((p, i) => toPoint(p.ms, mlBtTruth[i]))),
       truth: downsample(truthPoints.map(p => toPoint(p.ms, p.bt))),
     },
     {
@@ -357,6 +442,7 @@ export async function buildMruValidationSnapshot(range: {
       note: 'Shown for context only — ACE reports Bz in GSE here while OMNI reports GSM, so this is not scored.',
       l1: downsample(l1Samples.map(s => toPoint(new Date(s.timeUtc).getTime(), s.bzNt))),
       predicted: downsample(predicted.map(s => toPoint(new Date(s.arrivalTimeUtc).getTime(), s.bzNt))),
+      mlPredicted: downsample(truthPoints.map((p, i) => toPoint(p.ms, mlBzTruth[i]))),
       truth: downsample(truthPoints.map(p => toPoint(p.ms, p.bz))),
     },
   ];
@@ -366,6 +452,10 @@ export async function buildMruValidationSnapshot(range: {
     meanLagMinutes,
     sampleCount: { l1: predicted.length, truth: truthPoints.length, matched: matched.length },
     metrics,
+    mlAvailable,
+    mlTrainedAtUtc: mlArtifact?.trainedAtUtc ?? null,
+    mlMetrics,
+    mlOverallSkillPct,
     series,
     warnings,
   };
