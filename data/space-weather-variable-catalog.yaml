@@ -187,6 +187,22 @@ variables:
       GOES_SWPC_JSON: [">=100 MeV"]
     notes: "SEISS SGPS integral proton flux channel nearest >=100 MeV."
 
+  - canonical_name: goes_xrs_short_flux
+    label: "GOES XRS 0.05-0.4 nm"
+    unit: "W/m^2"
+    aliases:
+      GOES_NCEI: ["xrsa_flux"]
+      GOES_SWPC_JSON: ["0.05-0.4nm"]
+    notes: "EXIS XRS-A short-wavelength soft X-ray flux."
+
+  - canonical_name: goes_xrs_long_flux
+    label: "GOES XRS 0.1-0.8 nm"
+    unit: "W/m^2"
+    aliases:
+      GOES_NCEI: ["xrsb_flux"]
+      GOES_SWPC_JSON: ["0.1-0.8nm"]
+    notes: "EXIS XRS-B long-wavelength soft X-ray flux used for NOAA flare classes."
+
 sources:
   goes_nccei:
     source_id: "ncei-goes-r-mag-seiss"
@@ -245,3 +261,15 @@ sources:
             native: "AvgIntProtonFlux"
             unit: "pfu"
             transform: "select_nearest_energy(100MeV)"
+      xrs:
+        native_product: "xrsf-l2-avg1m"
+        cadence_s: 60
+        variables:
+          goes_xrs_short_flux:
+            native: "xrsa_flux"
+            unit: "W/m^2"
+            transform: "identity"
+          goes_xrs_long_flux:
+            native: "xrsb_flux"
+            unit: "W/m^2"
+            transform: "identity"

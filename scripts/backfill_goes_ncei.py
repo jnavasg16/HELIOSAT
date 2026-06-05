@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backfill NOAA NCEI GOES-R MAG and SEISS NetCDF files into local Parquet."""
+"""Backfill NOAA NCEI GOES-R MAG, SEISS, and EXIS XRS NetCDF files into local Parquet."""
 
 from __future__ import annotations
 
@@ -31,11 +31,13 @@ PRODUCT_PATHS = {
     "mag": "magn-l2-avg1m",
     "mpsh": "mpsh-l2-avg1m",
     "sgps": "sgps-l2-avg1m",
+    "xrs": "xrsf-l2-avg1m",
 }
 PRODUCT_INSTRUMENTS = {
     "mag": "MAG",
     "mpsh": "SEISS MPSH",
     "sgps": "SEISS SGPS",
+    "xrs": "EXIS XRS",
 }
 NORMALIZED_COLUMNS = [
     "timestamp_utc",
@@ -414,6 +416,13 @@ def to_utc_iso_strings(time_values: Any, time_attrs: dict[str, Any], np: Any, pd
     return [timestamp.isoformat().replace("+00:00", "Z") for timestamp in index]
 
 
+def find_time_data_array(ds: Any) -> Any | None:
+    for name in ("time", "L2_SciData_TimeStamp", "timestamp"):
+        if name in ds:
+            return ds[name]
+    return None
+
+
 def time_dim_for(da: Any) -> str:
     if "time" in da.dims:
         return "time"
@@ -715,14 +724,64 @@ def normalize_sgps(ds: Any, item: NceiFile, timestamps: list[str], np: Any, pd: 
     return pd.concat(frames, ignore_index=True)
 
 
+def xrs_quality(ds: Any, flux_name: str, count: int, np: Any) -> Any:
+    quality = np.zeros(count, dtype="int16")
+    num_name = f"{flux_name.removesuffix('_flux')}_num"
+    flag_name = f"{flux_name.removesuffix('_flux')}_flag"
+
+    if num_name in ds:
+        averaged_count = collapse_to_time_series(ds[num_name], np, reducer="max")
+        if averaged_count.size == count:
+            quality[averaged_count <= 0] = 4
+
+    if flag_name in ds:
+        flags = collapse_to_time_series(ds[flag_name], np, reducer="max")
+        if flags.size == count:
+            quality[(flags > 0) & (quality == 0)] = 1
+
+    return quality
+
+
+def normalize_xrs(ds: Any, item: NceiFile, timestamps: list[str], np: Any, pd: Any) -> Any:
+    frames = []
+    count = len(timestamps)
+    channels = [
+        ("goes_xrs_short_flux", "xrsa_flux", "0.05-0.4 nm"),
+        ("goes_xrs_long_flux", "xrsb_flux", "0.1-0.8 nm"),
+    ]
+
+    for variable, flux_name, band in channels:
+        if flux_name not in ds:
+            continue
+
+        values = collapse_to_time_series(ds[flux_name], np)
+        quality = quality_array_from_values(values, xrs_quality(ds, flux_name, count, np), np)
+        frames.append(
+            build_variable_frame(
+                pd,
+                timestamps,
+                item.spacecraft,
+                item.product,
+                variable,
+                values,
+                quality,
+                "W/m^2",
+                f"{flux_name}@{band}",
+            )
+        )
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=NORMALIZED_COLUMNS)
+
+
 def normalize_file(path: Path, item: NceiFile, variables: set[str] | None = None) -> Any:
     np, pd, xr = load_science_stack()
 
     with xr.open_dataset(path, mask_and_scale=True, decode_times=False) as ds:
-        if "time" not in ds:
+        time_da = find_time_data_array(ds)
+        if time_da is None:
             return pd.DataFrame(columns=NORMALIZED_COLUMNS)
 
-        timestamps = to_utc_iso_strings(ds["time"].values, ds["time"].attrs, np, pd)
+        timestamps = to_utc_iso_strings(time_da.values, time_da.attrs, np, pd)
 
         if item.product == "mag":
             frame = normalize_mag(ds, item, timestamps, np, pd)
@@ -730,6 +789,8 @@ def normalize_file(path: Path, item: NceiFile, variables: set[str] | None = None
             frame = normalize_mpsh(ds, item, timestamps, np, pd)
         elif item.product == "sgps":
             frame = normalize_sgps(ds, item, timestamps, np, pd)
+        elif item.product == "xrs":
+            frame = normalize_xrs(ds, item, timestamps, np, pd)
         else:
             frame = pd.DataFrame(columns=NORMALIZED_COLUMNS)
 
@@ -831,6 +892,31 @@ def mark_processed(
     checkpoint["updated_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def mark_raw_deleted(checkpoint: dict[str, Any], item: NceiFile, local_path: Path) -> None:
+    processed = checkpoint.setdefault("processed_files", {}).setdefault(item.url, {})
+    processed["local_path"] = str(local_path)
+    processed["raw_deleted"] = True
+    processed["raw_deleted_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    checkpoint["updated_at_utc"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def delete_raw_file(
+    local_path: Path,
+    checkpoint: dict[str, Any],
+    item: NceiFile,
+    checkpoint_path: Path,
+) -> bool:
+    try:
+        if local_path.exists():
+            local_path.unlink()
+        mark_raw_deleted(checkpoint, item, local_path)
+        save_json_atomic(checkpoint_path, checkpoint)
+        return True
+    except OSError as exc:
+        print(f"FAILED delete raw {local_path}: {exc}", file=sys.stderr, flush=True)
+        return False
+
+
 def mark_failed(checkpoint: dict[str, Any], item: NceiFile, error: Exception) -> None:
     checkpoint.setdefault("failed_files", {})[item.url] = {
         "failed_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -887,7 +973,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--product",
         default="all",
-        help="Comma-separated products: mag,mpsh,sgps. Default: all.",
+        help="Comma-separated products: mag,mpsh,sgps,xrs. Default: all.",
     )
     parser.add_argument(
         "--variables",
@@ -900,6 +986,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", default="data/checkpoints/goes_ncei_archive.json", help="Checkpoint JSON.")
     parser.add_argument("--download-dir", default=".cache/goes_ncei/downloads", help="NetCDF download cache.")
     parser.add_argument("--refresh-discovery", action="store_true", help="Ignore cached NCEI directory listings.")
+    parser.add_argument(
+        "--delete-raw-after-process",
+        action="store_true",
+        help="Delete each local NetCDF file after it is processed or confirmed already checkpointed.",
+    )
     parser.add_argument(
         "--incremental",
         action="store_true",
@@ -946,8 +1037,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.force or item.url not in checkpoint.get("processed_files", {})
     ]
     pull_started = datetime.now(UTC)
-    downloaded: list[tuple[NceiFile, Path]] = []
     failed = 0
+    rows_written = 0
+    skipped = len(files) - len(pending)
+    processed_count = 0
 
     print(f"Discovered {len(files)} files, {len(pending)} pending.", flush=True)
 
@@ -956,37 +1049,54 @@ def main(argv: list[str] | None = None) -> int:
         for future in concurrent.futures.as_completed(futures):
             item = futures[future]
             try:
-                downloaded.append((item, future.result()))
+                local_path = future.result()
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 mark_failed(checkpoint, item, exc)
                 save_json_atomic(checkpoint_path, checkpoint)
                 print(f"FAILED download {item.url}: {exc}", file=sys.stderr, flush=True)
+                completed = processed_count + failed
+                if completed % 100 == 0 or completed == len(pending):
+                    print(
+                        f"Progress completed={completed}/{len(pending)} processed={processed_count} "
+                        f"failed={failed} rows_written={rows_written}",
+                        flush=True,
+                    )
+                continue
 
-    rows_written = 0
-    skipped = len(files) - len(pending)
-    processed_count = 0
+            try:
+                next_rows, was_skipped = process_file(
+                    item,
+                    local_path,
+                    store_root,
+                    checkpoint,
+                    checkpoint_path,
+                    variables,
+                    force=args.force,
+                )
+                rows_written += next_rows
+                skipped += int(was_skipped)
+                processed_count += int(not was_skipped)
+                deleted = (
+                    delete_raw_file(local_path, checkpoint, item, checkpoint_path)
+                    if args.delete_raw_after_process
+                    else False
+                )
+                delete_label = " raw_deleted" if deleted else ""
+                print(f"OK {item.spacecraft} {item.product} {item.day} rows={next_rows}{delete_label}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                mark_failed(checkpoint, item, exc)
+                save_json_atomic(checkpoint_path, checkpoint)
+                print(f"FAILED process {item.url}: {exc}", file=sys.stderr, flush=True)
 
-    for item, local_path in sorted(downloaded, key=lambda pair: (pair[0].day, pair[0].spacecraft, pair[0].product)):
-        try:
-            next_rows, was_skipped = process_file(
-                item,
-                local_path,
-                store_root,
-                checkpoint,
-                checkpoint_path,
-                variables,
-                force=args.force,
-            )
-            rows_written += next_rows
-            skipped += int(was_skipped)
-            processed_count += int(not was_skipped)
-            print(f"OK {item.spacecraft} {item.product} {item.day} rows={next_rows}", flush=True)
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            mark_failed(checkpoint, item, exc)
-            save_json_atomic(checkpoint_path, checkpoint)
-            print(f"FAILED process {item.url}: {exc}", file=sys.stderr, flush=True)
+            completed = processed_count + failed
+            if completed % 100 == 0 or completed == len(pending):
+                print(
+                    f"Progress completed={completed}/{len(pending)} processed={processed_count} "
+                    f"failed={failed} rows_written={rows_written}",
+                    flush=True,
+                )
 
     elapsed_minutes = max((datetime.now(UTC) - pull_started).total_seconds() / 60.0, 1 / 60)
     checkpoint["last_pull"] = {

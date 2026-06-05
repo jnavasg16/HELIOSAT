@@ -1,7 +1,9 @@
 import math
 
 from scripts.backfill_goes_ncei import (
+    PRODUCT_PATHS,
     compute_h_magnitude,
+    find_time_data_array,
     map_ncei_quality_flag,
     refresh_last_timestamp_from_partitions,
     update_last_timestamp_ingested,
@@ -31,6 +33,16 @@ def test_quality_mapping_uses_ncei_flag_semantics():
     assert map_ncei_quality_flag(4) == 4
     assert map_ncei_quality_flag(None) == 4
     assert map_ncei_quality_flag(float("nan")) == 4
+
+
+def test_goes_ncei_backfill_includes_xrs_product():
+    assert PRODUCT_PATHS["xrs"] == "xrsf-l2-avg1m"
+
+
+def test_legacy_l2_science_timestamp_is_accepted():
+    marker = object()
+
+    assert find_time_data_array({"L2_SciData_TimeStamp": marker}) is marker
 
 
 def test_checkpoint_last_timestamp_never_regresses():

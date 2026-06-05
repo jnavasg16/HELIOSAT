@@ -40,7 +40,15 @@ function parseMs(value: string): number {
 
 export async function fetchOmniHourlyHistory(days: number): Promise<OmniHistoryResult> {
   const endMs = Date.now();
-  const startMs = endMs - days * 24 * 60 * 60 * 1000;
+  return fetchOmniHourlyRange(endMs - days * 24 * 60 * 60 * 1000, endMs);
+}
+
+/**
+ * OMNI hourly for an explicit [startMs, endMs] window. CDAWeb is slow for multi-year
+ * spans, so the archive builder calls this in ≤1-year chunks. One request carries the
+ * cleaned solar wind AND the planetary Kp + Dst.
+ */
+export async function fetchOmniHourlyRange(startMs: number, endMs: number): Promise<OmniHistoryResult> {
   const timeMin = new Date(startMs).toISOString();
   const timeMax = new Date(endMs).toISOString();
   const url = `${HAPI_BASE}?id=${DATASET}&parameters=${PARAMS}&time.min=${timeMin}&time.max=${timeMax}&format=csv`;
