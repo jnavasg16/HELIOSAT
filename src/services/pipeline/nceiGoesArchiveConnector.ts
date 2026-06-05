@@ -20,6 +20,7 @@ export const NCEI_GOES_PRODUCTS = {
   mag: 'magn-l2-avg1m',
   mpsh: 'mpsh-l2-avg1m',
   sgps: 'sgps-l2-avg1m',
+  xrs: 'xrsf-l2-avg1m',
 } as const;
 
 interface NceiGoesArchiveDailyCoverage {

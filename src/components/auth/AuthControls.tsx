@@ -4,6 +4,7 @@ import {
   Eye,
   EyeOff,
   FlaskConical,
+  Gauge,
   KeyRound,
   LogIn,
   LogOut,
@@ -564,6 +565,18 @@ export function AuthControls() {
                   >
                     <FlaskConical className="h-4 w-4" aria-hidden="true" />
                     <span>Playground</span>
+                  </a>
+                )}
+                {user.cargo === 'admin' && (
+                  <a
+                    href="/console"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-md border border-slate-700 px-3 text-sm text-slate-200 transition hover:border-cyan-400/40 hover:text-cyan-100"
+                  >
+                    <Gauge className="h-4 w-4" aria-hidden="true" />
+                    <span>Internal Console</span>
                   </a>
                 )}
                 <button

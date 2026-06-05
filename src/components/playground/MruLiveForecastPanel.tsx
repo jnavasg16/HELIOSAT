@@ -804,7 +804,7 @@ function HistoryChart({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-300">{title}</h3>
         <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-[9px] uppercase tracking-widest">
-          <span className="flex items-center gap-1" style={{ color }}><span className="h-0.5 w-3" style={{ backgroundColor: color }} />{data.source === 'omni' ? 'Observed (OMNI)' : 'Detected L1'}</span>
+          <span className="flex items-center gap-1" style={{ color }}><span className="h-0.5 w-3" style={{ backgroundColor: color }} />{data.source === 'omni' ? 'Detected near Earth' : 'Detected L1'}</span>
           {hasMru && <span className="flex items-center gap-1 text-cyan-200"><span className="h-0.5 w-3" style={{ backgroundColor: MRU_COLOR }} />MRU</span>}
           {hasMl && <span className="flex items-center gap-1 text-purple-200"><span className="h-0.5 w-3" style={{ backgroundColor: ML_COLOR }} />ML</span>}
           <span className="text-slate-500">{unit}</span>
@@ -843,7 +843,7 @@ function HistoryChart({
                 labelFormatter={value => `${new Date(Number(value)).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone })} ${tzLabel}`}
                 formatter={(value, name) => [Number(value).toFixed(2), String(name)]}
               />
-              <Line name={data.source === 'omni' ? 'Observed' : 'Detected L1'} dataKey="measured" stroke={color} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} type="linear" />
+              <Line name={data.source === 'omni' ? 'Detected near Earth' : 'Detected L1'} dataKey="measured" stroke={color} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} type="linear" />
               {hasMru && <Line name="MRU" dataKey="mru" stroke={MRU_COLOR} strokeWidth={1.3} dot={false} connectNulls isAnimationActive={false} type="linear" />}
               {hasMl && <Line name="ML" dataKey="ml" stroke={ML_COLOR} strokeWidth={1.3} dot={false} connectNulls isAnimationActive={false} type="linear" />}
               <Brush

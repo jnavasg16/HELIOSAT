@@ -107,7 +107,7 @@ interface SscOrbitRequest {
 const HAPI_BASE_URL = 'https://cdaweb.gsfc.nasa.gov/hapi';
 const SSC_BASE_URL = 'https://sscweb.gsfc.nasa.gov/WS/sscr/2';
 const SWPC_GOES_BASE_URL = 'https://services.swpc.noaa.gov/json/goes';
-const REQUEST_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 12000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 350;
 const MAX_POINTS_PER_CHART = 240;
